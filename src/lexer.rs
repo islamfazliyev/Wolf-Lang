@@ -1,3 +1,5 @@
+use std::string::ParseError;
+
 use crate::tokens::{self, Token};
 
 pub fn lexer(content: &str) -> Result<Vec<Token>, String> {
@@ -32,6 +34,9 @@ pub fn lexer(content: &str) -> Result<Vec<Token>, String> {
                 "print" => token.push(Token::Print),
                 "true" => token.push(Token::Boolean(true)),
                 "false" => token.push(Token::Boolean(false)),
+                "if" => token.push(Token::If),
+                //other
+                "end" => token.push(Token::EndOfCondition),
                 _ => token.push(Token::Identifier(slice)),
             }
 
@@ -70,7 +75,49 @@ pub fn lexer(content: &str) -> Result<Vec<Token>, String> {
 
         // ---------- Operators ----------
         match c {
-            '=' => { token.push(Token::Assign); i += 1; continue; }
+            '=' => { 
+                if i + 1 < chars.len() && chars[i + 1] == '=' {
+                    token.push(Token::Equals);
+                    i += 2;
+                } else {
+                    token.push(Token::Assign);
+                    i += 1;
+                }
+                continue;
+            }
+
+            '!' => {
+                if i + 1 < chars.len() && chars[i + 1] == '=' {
+                    token.push(Token::NotEquals);
+                    i += 2;
+                    continue;
+                } else {
+                    return Err(format!("Unexpected token starting at index {}", i))
+                }
+            }
+
+            '<' => { 
+                if i + 1 < chars.len() && chars[i + 1] == '=' {
+                    token.push(Token::LesserEquals);
+                    i += 2;
+                } else {
+                    token.push(Token::Lesser);
+                    i += 1;
+                }
+                continue;
+            }
+
+            '>' => { 
+                if i + 1 < chars.len() && chars[i + 1] == '=' {
+                    token.push(Token::GreaterEquals);
+                    i += 2;
+                } else {
+                    token.push(Token::Greater);
+                    i += 1;
+                }
+                continue;
+            }
+
             '+' => { token.push(Token::Plus); i += 1; continue; }
             '-' => { token.push(Token::Minus); i += 1; continue; }
             '*' => { token.push(Token::Multiply); i += 1; continue; }
@@ -89,4 +136,25 @@ pub fn lexer(content: &str) -> Result<Vec<Token>, String> {
     }
 
     Ok(token)
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::lexer::lexer;
+
+    #[test]
+    fn testLexer()
+    {
+        let content = "let string message = \"hello world\" let int num = 1 + 1 print message print num if test > >= < <= \"test\" print \"hello world\" end";
+        let tokens = match lexer(&content) {
+            Ok(tokens) => {
+                tokens
+            }
+            Err(err) => {
+                eprintln!("Lexer error: {}", err);
+                return;
+            }
+        };
+        println!("{:?}", tokens)
+    }
 }

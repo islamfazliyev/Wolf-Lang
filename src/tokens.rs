@@ -28,7 +28,21 @@ pub enum Token {
     LBrace,
     RBrace,
 
+    //Conditions
+    If,
+    For,
+    While,
+
+    //Condition Operators
+    Equals,
+    Greater,
+    Lesser,
+    GreaterEquals,
+    LesserEquals,
+    NotEquals,
+
     // other
+    EndOfCondition,
     Semicolon,
     EOF,
 }

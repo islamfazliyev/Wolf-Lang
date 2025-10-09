@@ -1,4 +1,4 @@
-use std::{collections::HashMap};
+use std::{collections::HashMap, thread::scope};
 
 use crate::{error_handler::ParseError, tokens::{self, Token}};
 
@@ -61,7 +61,6 @@ impl Parser {
 
         let mut var_name: Option<String> = None;
         let mut assigned_value: Option<Token> = None;
-
         let mut declared_type: Option<Token> = None;
 
         // After `let` → expect type (number/string/bool)
@@ -112,36 +111,31 @@ impl Parser {
         self.eat(Token::Assign)?;
 
         if let Some(decl_ty) = declared_type.as_ref() {
-            // --- NEW LOGIC: Check for mathematical expressions ---
             if *decl_ty == Token::TypeNumber {
-                match self.parse_expr() {
-                    Ok(result) => {
-                        // If parse_expr succeeds, the value is the calculated result.
+                match self.parse_expr()? {
+                    Token::Number(result) => {
                         assigned_value = Some(Token::Number(result));
                         self.output.push(format!("value (expression result) {}", result));
-                        // NOTE: parse_expr correctly advances self.pos, so no manual pos += 1 here.
                     }
-                    // If the expression parser fails (e.g., unexpected token), propagate the error
-                    Err(e) => return Err(e),
+                    _ => {
+                        return Err(ParseError::TypeMismatch {
+                            expected: Token::TypeNumber,
+                            found: Token::Boolean(false), // placeholder
+                        })
+                    }
                 }
-            } 
-            // --- OLD LOGIC: Handle String and Boolean literals ---
-            else if let Some(next) = self.current_token() {
+            } else if let Some(next) = self.current_token() {
                 match next {
-                    // We removed Token::Number(n) check here since parse_expr handles it now.
-                    
                     Token::String(s) => {
                         assigned_value = Some(next.clone());
                         self.output.push(format!("value {}", s));
                         self.pos += 1;
                     }
-
                     Token::Boolean(b) => {
                         assigned_value = Some(next.clone());
                         self.output.push(format!("value {}", b));
                         self.pos += 1;
                     }
-
                     _ => {
                         return Err(ParseError::UnexpectedToken {
                             expected: Token::String("literal or expression".to_string()),
@@ -156,14 +150,12 @@ impl Parser {
                 })
             }
         }
-    
 
         if let (Some(decl_ty), Some(val_tok)) = (declared_type.as_ref(), assigned_value.as_ref()) {
             let matches = match (decl_ty, val_tok) {
                 (Token::TypeBool, Token::Boolean(_)) => true,
                 (Token::TypeNumber, Token::Number(_)) => true,
                 (Token::TypeString, Token::String(_)) => true,
-
                 _ => false
             };
 
@@ -234,18 +226,149 @@ impl Parser {
         Ok(())
     }
 
-    fn parse_expr(&mut self) -> Result<f64, ParseError> {
+    fn parse_condition(&mut self) -> Result<bool, ParseError> {
+        let lhs_token = self.parse_expr()?;
+       
+
+        let op_token_opt = self.current_token().cloned();
+
+        if let Some(op_token) = op_token_opt {
+            match op_token {
+                Token::Equals | Token::NotEquals | Token::Greater | 
+                Token::Lesser | Token::GreaterEquals | Token::LesserEquals => {
+                    self.pos += 1;
+
+                    let rhs_token = self.parse_expr()?;
+                    match (&lhs_token, &rhs_token) {
+                        (Token::Number(lhs), Token::Number(rhs)) => {
+                            let result = match op_token {
+                                Token::Equals => lhs == rhs,
+                                Token::NotEquals => lhs != rhs,
+                                Token::Greater => lhs > rhs,
+                                Token::Lesser => lhs < rhs,
+                                Token::GreaterEquals => lhs >= rhs,
+                                Token::LesserEquals => lhs <= rhs,
+                                _ => unreachable!(),
+                            };
+                            return Ok(result);
+                        }
+                        (Token::String(lhs), Token::String(rhs)) => {
+                            let result = match op_token {
+                                Token::Equals => lhs == rhs,
+                                Token::NotEquals => lhs != rhs,
+                                _ => {
+                                    return Err(ParseError::UnexpectedToken {
+                                        expected: Token::Equals, 
+                                        found: Some(op_token),
+                                    })
+                                },
+                            };
+                            return Ok(result);
+                        }
+
+                        (Token::Boolean(lhs), Token::Boolean(rhs)) => {
+                            let result = match op_token {
+                                Token::Equals => lhs == rhs,
+                                Token::NotEquals => lhs != rhs,
+                                _ => {
+                                    return Err(ParseError::UnexpectedToken {
+                                        expected: Token::Equals, 
+                                        found: Some(op_token),
+                                    })
+                                },
+                            };
+                            return Ok(result);
+                        }
+                        _ => {
+                            // Type mismatch - farklı tipler karşılaştırılamaz
+                            return Err(ParseError::TypeMismatch {
+                                expected: lhs_token.clone(),
+                                found: rhs_token,
+                            });
+                        }
+                    }
+
+                }
+                _ => {}
+            }
+        }
+        Err(ParseError::UnexpectedToken {
+            expected: Token::Equals,
+            found: self.current_token().cloned(),
+        })
+    }
+
+    fn parse_if(&mut self) -> Result<(), ParseError> {
+        self.eat(Token::If)?;
+
+        let condition_result = self.parse_condition()?; 
+
+        let mut block_tokens: Vec<Token> = Vec::new();
+        let mut block_pos = self.pos;
+        let mut scope_depth = 1;
+
+        while let Some(tok) = self.tokens.get(block_pos) {
+            if *tok == Token::If {
+                scope_depth += 1;
+            } else if *tok == Token::EndOfCondition {
+                scope_depth -= 1;
+                if scope_depth == 0 {
+                   
+                    break;
+                }
+            }
+            block_tokens.push(tok.clone());
+            block_pos += 1;
+        }
+
+        if scope_depth != 0 {
+            return Err(ParseError::UnexpectedToken {
+                expected: Token::EndOfCondition,
+                found: None, // Missing 'end'
+            });
+        }
+        self.pos = block_pos + 1;
+
+        
+
+        if condition_result {
+            let mut block_parser = Parser::new(block_tokens);
+            block_parser.symbol_table = self.symbol_table.clone(); // Copy parent scope
+            while let Some(_) = block_parser.current_token() {
+                block_parser.sense()?;
+            }
+        }
+        Ok(())
+    }
+
+    fn parse_expr(&mut self) -> Result<Token, ParseError> {
         let mut result = self.parse_term()?; 
 
         while let Some(tok) = self.current_token() {
             match tok {
                 Token::Plus => {
                     self.eat(Token::Plus)?;
-                    result += self.parse_term()?;
+                    let next_term = self.parse_term()?;
+                    if let (Token::Number(lhs), Token::Number(rhs)) = (&result, &next_term) {
+                        result = Token::Number(lhs + rhs);
+                    } else {
+                        return Err(ParseError::TypeMismatch {
+                            expected: Token::TypeNumber,
+                            found: next_term,
+                        });
+                    }
                 }
                 Token::Minus => {
                     self.eat(Token::Minus)?;
-                    result -= self.parse_term()?;
+                    let next_term = self.parse_term()?;
+                    if let (Token::Number(lhs), Token::Number(rhs)) = (&result, &next_term) {
+                        result = Token::Number(lhs - rhs);
+                    } else {
+                        return Err(ParseError::TypeMismatch {
+                            expected: Token::TypeNumber,
+                            found: next_term,
+                        });
+                    }
                 }
                 _ => break,
             }
@@ -253,26 +376,43 @@ impl Parser {
         Ok(result)
     }
 
-    fn parse_term(&mut self) -> Result<f64, ParseError> {
+    fn parse_term(&mut self) -> Result<Token, ParseError> {
         let mut result = self.parse_factor()?; 
 
         while let Some(tok) = self.current_token() {
             match tok {
                 Token::Multiply => {
                     self.eat(Token::Multiply)?;
-                    result *= self.parse_factor()?;
+                    let next_factor = self.parse_factor()?;
+                    if let (Token::Number(lhs), Token::Number(rhs)) = (&result, &next_factor) {
+                        result = Token::Number(lhs * rhs);
+                    } else {
+                        return Err(ParseError::TypeMismatch {
+                            expected: Token::TypeNumber,
+                            found: next_factor,
+                        });
+                    }
                 }
                 Token::Divide => {
                     self.eat(Token::Divide)?;
-                    result /= self.parse_factor()?;
+                    let next_factor = self.parse_factor()?;
+                    if let (Token::Number(lhs), Token::Number(rhs)) = (&result, &next_factor) {
+                        
+                        result = Token::Number(lhs / rhs);
+                    } else {
+                        return Err(ParseError::TypeMismatch {
+                            expected: Token::TypeNumber,
+                            found: next_factor,
+                        });
+                    }
                 }
-                _ => break
+                _ => break,
             }
         }
         Ok(result)
     }
 
-    fn parse_factor(&mut self) -> Result<f64, ParseError> {
+    fn parse_factor(&mut self) -> Result<Token, ParseError> {
         let tok = match self.current_token().cloned() {
             Some(t) => t,
             None => {
@@ -285,45 +425,49 @@ impl Parser {
 
         match tok {
             Token::Number(n) => {
-                self.eat(Token::Number(n))?; 
-                Ok(n)
+                self.eat(Token::Number(n))?;
+                Ok(Token::Number(n))
             }
-
+            Token::String(s) => {
+                self.eat(Token::String(s.clone()))?;
+                Ok(Token::String(s))
+            }
+            Token::Boolean(b) => {
+                self.eat(Token::Boolean(b))?;
+                Ok(Token::Boolean(b))
+            }
             Token::Plus => {
                 self.eat(Token::Plus)?;
-                return self.parse_factor()
+                self.parse_factor()
             }
             Token::Minus => {
                 self.eat(Token::Minus)?;
-                let value = self.parse_factor()?;
-                return Ok(-value)
+                let value_token = self.parse_factor()?;
+                if let Token::Number(n) = value_token {
+                    Ok(Token::Number(-n))
+                } else {
+                    Err(ParseError::TypeMismatch {
+                        expected: Token::TypeNumber,
+                        found: value_token,
+                    })
+                }
             }
-
             Token::LParen => {
                 self.eat(Token::LParen)?;
                 let result = self.parse_expr()?;
                 self.eat(Token::RParen)?;
-                return Ok(result)
+                Ok(result)
             }
-
             Token::Identifier(name) => {
                 self.eat(Token::Identifier(name.clone()))?;
                 if let Some(value_token) = self.symbol_table.get(&name) {
-                    if let Token::Number(n) =  value_token{
-                        return Ok(*n)
-                    } else {
-                        return Err(ParseError::TypeMismatch {
-                            expected: Token::TypeNumber,
-                            found: value_token.clone(),
-                        })
-                    }
+                    Ok(value_token.clone())
                 } else {
-                    return Err(ParseError::UndeclaredVariable { name })
+                    Err(ParseError::UndeclaredVariable { name })
                 }
-
             }
-
             _ => {
+                println!("error here");
                 Err(ParseError::UnexpectedToken {
                     expected: Token::Number(0.0),
                     found: Some(tok),
@@ -338,6 +482,7 @@ impl Parser {
                 match tok {
                     Token::Let => self.parse_let(),
                     Token::Print => self.parse_print(),
+                    Token::If => self.parse_if(),
                     _ => {
                         let name = format!("{:?}", tok);
                         self.output.push("unknown".to_string());
