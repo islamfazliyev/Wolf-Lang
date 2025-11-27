@@ -1,0 +1,15 @@
+fn calc(x, y)
+    print x + y
+end
+
+fn calcR(x, y)
+    return x + y
+end
+
+calc(10, 25)
+
+print calcR(2, 5)
+
+let int result = calcR(40, 2)
+
+print result

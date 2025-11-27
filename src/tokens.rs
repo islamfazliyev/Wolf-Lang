@@ -2,8 +2,10 @@
 pub enum Token {
     // Types
     TypeString,
-    TypeNumber,
+    TypeInt,
+    TypeFloat,
     TypeBool,
+    TypeList,
 
     // Keywords
     Let,
@@ -11,9 +13,11 @@ pub enum Token {
 
     // Identifiers and literals
     Identifier(String),
-    Number(i64),
+    Integer(i64),
+    Float(f64),
     String(String),
     Boolean(bool),
+    List(Vec<Token>),
 
     // Operators
     Assign,    // =
@@ -27,6 +31,8 @@ pub enum Token {
     RParen,
     LBrace,
     RBrace,
+    LBracket,
+    RBracket,
 
     //Conditions
     If,

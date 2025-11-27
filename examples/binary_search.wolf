@@ -1,0 +1,35 @@
+let list data = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
+
+fn binary_search(target, left, right)
+    if left > right
+        return -1
+    end
+
+    let int mid = left + (right - left) / 2
+    let int value = data[mid]
+
+    print "Checking index: " + mid + " Value: " + value
+
+    if value == target
+        return mid
+    end
+
+    if value > target
+        return binary_search(target, left, mid - 1)
+    end
+
+    if value < target
+        return binary_search(target, mid + 1, right)
+    end
+end
+
+print "--- Binary Search Started ---"
+
+let int target = 90
+let int result = binary_search(target, 0, 9)
+
+if result == -1 
+    print "Target not found!"
+else
+    print "Target found at index: " + result
+end

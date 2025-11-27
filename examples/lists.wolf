@@ -1,0 +1,6 @@
+let list type = [1, 2, 3]
+
+print type[2]
+
+type[2] = 5
+print type[2]

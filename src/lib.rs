@@ -21,7 +21,7 @@ impl WolfEngine {
     }
 
     pub fn push_int(&mut self, name: &str, value: i64) {
-        self.globals.insert(name.to_string(), Token::Number(value));
+        self.globals.insert(name.to_string(), Token::Integer(value));
     }
 
     pub fn push_str(&mut self, name: &str, value: &str) {
@@ -63,7 +63,7 @@ impl WolfEngine {
     }
 
     pub fn get_int(&self, name: &str) -> Option<i64> {
-        if let Some(Token::Number(n)) = self.globals.get(name) {
+        if let Some(Token::Integer(n)) = self.globals.get(name) {
             Some(*n)
         } else {
             None

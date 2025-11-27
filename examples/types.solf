@@ -1,0 +1,10 @@
+let int number = 1
+let float number2 = 1.1
+let string text = "hello world"
+let bool condition = true
+
+
+print number
+print number2
+print text
+print condition

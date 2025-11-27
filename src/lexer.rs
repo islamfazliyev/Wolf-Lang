@@ -26,9 +26,11 @@ pub fn lexer(content: &str) -> Result<Vec<Token>, String> {
 
             match slice.as_str() {
                 "let" => token.push(Token::Let),
-                "int" => token.push(Token::TypeNumber),
+                "int" => token.push(Token::TypeInt),
+                "float" => token.push(Token::TypeFloat),
                 "bool" => token.push(Token::TypeBool),
                 "string" => token.push(Token::TypeString),
+                "list" => token.push(Token::TypeList),
                 "print" => token.push(Token::Print),
                 "true" => token.push(Token::Boolean(true)),
                 "false" => token.push(Token::Boolean(false)),
@@ -53,9 +55,17 @@ pub fn lexer(content: &str) -> Result<Vec<Token>, String> {
             while i < chars.len() && (chars[i].is_ascii_digit() || chars[i] == '.') {
                 i += 1;
             }
+            
             let slice: String = chars[start..i].iter().collect();
-            let value: i64 = slice.parse().map_err(|_| format!("Invalid number: {}", slice))?;
-            token.push(Token::Number(value));
+
+            if slice.contains('.') {
+                let value: f64 = slice.parse().map_err(|_| format!("Invalid float number: {}", slice))?;
+                token.push(Token::Float(value));
+            } else {
+                let value: i64 = slice.parse().map_err(|_| format!("Invalid integer: {}", slice))?;
+                token.push(Token::Integer(value));
+            }
+
             continue;
         }
 
@@ -127,8 +137,8 @@ pub fn lexer(content: &str) -> Result<Vec<Token>, String> {
             '/' => { token.push(Token::Divide); i += 1; continue; }
             '(' => { token.push(Token::LParen); i += 1; continue; }
             ')' => { token.push(Token::RParen); i += 1; continue; }
-            '{' => { token.push(Token::LBrace); i += 1; continue; }
-            '}' => { token.push(Token::RBrace); i += 1; continue; }
+            '[' => { token.push(Token::LBracket); i += 1; continue; }
+            ']' => { token.push(Token::RBracket); i += 1; continue; }
             ',' => { token.push(Token::Comma); i += 1; continue; }
             _ => {}
         }

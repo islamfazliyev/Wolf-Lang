@@ -12,8 +12,8 @@ The core of the language, reasoning capabilities, and memory management.
 
 ## 📅 Week 2: Memory & Data
 Transitioning from single values to lists and data structures.
-- [ ] **Arrays:** Implementation of `let list x = [1, 2, 3]`.
-- [ ] **Indexing:** Reading data via `print x[0]`.
+- [x] **Arrays:** Implementation of `let list x = [1, 2, 3]`.
+- [x] **Indexing:** Reading data via `print x[0]`.
 - [ ] **Methods:** Binding Rust vector methods like `push`, `pop`, `len`.
 - [ ] **Mini Project:** A simple "Notepad" application using WolfLang.
 

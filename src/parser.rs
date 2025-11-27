@@ -133,7 +133,7 @@ impl Parser {
         // After `let` → expect type (number/string/bool)
         if let Some(next) = self.current_token() {
             match next {
-                Token::TypeNumber | Token::TypeString | Token::TypeBool => {
+                Token::TypeInt | Token::TypeString | Token::TypeBool | Token::TypeFloat | Token::TypeList => {
                     declared_type = Some(next.clone());
                     let ty = format!("{:?}", next);
                     self.output.push(format!("type {}", ty));
@@ -142,14 +142,14 @@ impl Parser {
                 _ => {
                     // throw error
                     return Err(ParseError::UnexpectedToken {
-                        expected: Token::TypeNumber, // just a placeholder
+                        expected: Token::TypeInt, // just a placeholder
                         found: Some(next.clone()),
                     })
                 }
             }
         } else {
             return Err(ParseError::UnexpectedToken {
-                expected: Token::TypeNumber,
+                expected: Token::TypeInt,
                 found: None,
             });
         }
@@ -187,8 +187,10 @@ impl Parser {
         if let Some(decl_ty) = declared_type.as_ref() {
             let matches = match (decl_ty, &assigned_value) {
                 (Token::TypeBool, Token::Boolean(_)) => true,
-                (Token::TypeNumber, Token::Number(_)) => true,
+                (Token::TypeInt, Token::Integer(_)) => true,
+                (Token::TypeFloat, Token::Float(_)) => true,
                 (Token::TypeString, Token::String(_)) => true,
+                (Token::TypeList, Token::List(_)) => true,
                 _ => false
             };
 
@@ -232,6 +234,47 @@ impl Parser {
         Ok(())
     }
 
+    fn parse_list_index(&mut self, list_name: &str) -> Result<Token, ParseError> {
+        self.eat(Token::Identifier(list_name.to_string()))?;
+        self.eat(Token::LBracket)?;
+        let index_expr = self.parse_expr()?;
+        
+        self.eat(Token::RBracket)?;
+
+        let index_val = if let Token::Integer(n) = index_expr {
+            if n < 0 {
+                return Err(ParseError::UnkownType { 
+                    type_name: format!("Index cannot be negative: {}", n) 
+                });
+            }
+            n as usize
+        } else {
+            return Err(ParseError::TypeMismatch {
+                expected: Token::TypeInt,
+                found: index_expr,
+            });
+        };
+
+        let variable_token = self.get_variable(list_name)
+            .ok_or(ParseError::UndeclaredVariable { name: list_name.to_string() })?
+            .clone();
+
+        if let Token::List(elements) = variable_token {
+            if index_val < elements.len() {
+                Ok(elements[index_val].clone())
+            } else {
+                return Err(ParseError::UnkownType {
+                    type_name: format!("Index out of bounds! Index: {}, Length: {}", index_val, elements.len())
+                })
+            }
+        } else {
+            return Err(ParseError::TypeMismatch {
+                expected: Token::TypeList,
+                found: variable_token,
+            })
+        }
+    }
+
     /// Parses a 'print' statement. e.g., print "Hello", 10 + 5
     fn parse_print(&mut self) -> Result<(), ParseError> {
         // Consume the 'print' keyword.
@@ -262,7 +305,8 @@ impl Parser {
         match token {
             // Print literal values directly.
             Token::String(s) => print!("{:?} ", s),
-            Token::Number(n) => print!("{:?} ", n),
+            Token::Integer(n) => print!("{:?} ", n),
+            Token::Float(f) => print!("{:?} ", f),
             Token::Boolean(b) => print!("{:?} ", b),
             // If it's an identifier, we need to look up its value.
             Token::Identifier(name) => {
@@ -270,7 +314,8 @@ impl Parser {
                     // Found the variable, now print its stored value.
                     match value_token {
                         Token::String(s) => print!("{:?} ", s),
-                        Token::Number(n) => print!("{:?} ", n),
+                        Token::Integer(n) => print!("{:?} ", n),
+                        Token::Float(f) => print!("{:?} ", f),
                         Token::Boolean(b) => print!("{:?} ", b),
                         _ => {} // Should not happen if types are managed correctly
                     }
@@ -310,7 +355,7 @@ impl Parser {
                     // Perform type-checked comparison.
                     match (&lhs_token, &rhs_token) {
                         // Both are numbers.
-                        (Token::Number(lhs), Token::Number(rhs)) => {
+                        (Token::Integer(lhs), Token::Integer(rhs)) => {
                             let result = match op_token {
                                 Token::Equals => lhs == rhs,
                                 Token::NotEquals => lhs != rhs,
@@ -322,6 +367,20 @@ impl Parser {
                             };
                             return Ok(result);
                         }
+
+                        (Token::Float(lhs), Token::Float(rhs)) => {
+                            let result = match op_token {
+                                Token::Equals => lhs == rhs,
+                                Token::NotEquals => lhs != rhs,
+                                Token::Greater => lhs > rhs,
+                                Token::Lesser => lhs < rhs,
+                                Token::GreaterEquals => lhs >= rhs,
+                                Token::LesserEquals => lhs <= rhs,
+                                _ => unreachable!(), // We matched these tokens above
+                            };
+                            return Ok(result);
+                        }
+
                         // Both are strings.
                         (Token::String(lhs), Token::String(rhs)) => {
                             let result = match op_token {
@@ -518,17 +577,17 @@ impl Parser {
         self.eat(Token::For)?;
         
         match self.current_token() {
-            Some(Token::TypeNumber) => {
-                self.eat(Token::TypeNumber)?; 
+            Some(Token::TypeInt) => {
+                self.eat(Token::TypeInt)?; 
             }
 
             Some(tok) => {
                 // ERROR: 'int' expected after 'for'
-                return Err(ParseError::TypeMismatch { expected: Token::TypeNumber, found: tok.clone() });
+                return Err(ParseError::TypeMismatch { expected: Token::TypeInt, found: tok.clone() });
             },
             None => {
                 // ERROR: File ended after 'for'
-                return Err(ParseError::UnexpectedToken { expected: Token::TypeNumber, found: None });
+                return Err(ParseError::UnexpectedToken { expected: Token::TypeInt, found: None });
             }
             
             _ => {
@@ -549,23 +608,23 @@ impl Parser {
         self.eat(Token::Assign)?;
 
         let start_val = match self.current_token() {
-            Some(Token::Number(n)) => {
+            Some(Token::Integer(n)) => {
                 let val = *n;
                 self.pos += 1;
                 val
             }
-            _ => return Err(ParseError::UnexpectedToken { expected: Token::Number(0), found: self.current_token().cloned() })
+            _ => return Err(ParseError::UnexpectedToken { expected: Token::Integer(0), found: self.current_token().cloned() })
         };
 
         self.eat(Token::Range)?;
 
         let end_val = match self.current_token() {
-            Some(Token::Number(n)) => {
+            Some(Token::Integer(n)) => {
                 let val = *n;
                 self.pos += 1; // Consume number
                 val
             },
-            _ => return Err(ParseError::UnexpectedToken { expected: Token::Number(0), found: self.current_token().cloned() })
+            _ => return Err(ParseError::UnexpectedToken { expected: Token::Integer(0), found: self.current_token().cloned() })
         };
 
         let (block_tokens, end_of_loop_pos) = self.find_loop_block(self.pos)?;
@@ -575,7 +634,7 @@ impl Parser {
         while current_val < end_val {
             self.scopes.push(HashMap::new());
 
-            self.define_variable(var_name.clone(), Token::Number(current_val));
+            self.define_variable(var_name.clone(), Token::Integer(current_val));
 
             let mut block_parser = Parser::new(block_tokens.clone());
             block_parser.scopes = self.scopes.clone();
@@ -654,19 +713,22 @@ impl Parser {
                     // Parse the next term.
                     let next_term = self.parse_term()?;
                     match (&result, &next_term) {
-                        (Token::Number(lhs), Token::Number(rhs)) => {
-                            result = Token::Number(lhs + rhs);
+                        (Token::Integer(lhs), Token::Integer(rhs)) => {
+                            result = Token::Integer(lhs + rhs);
+                        },
+                        (Token::Float(lhs), Token::Float(rhs)) => {
+                            result = Token::Float(lhs + rhs);
                         },
                         
                         (Token::String(lhs), Token::String(rhs)) => {
                             result = Token::String(format!("{}{}", lhs, rhs));
                         },
 
-                        (Token::String(lhs), Token::Number(rhs)) => {
+                        (Token::String(lhs), Token::Integer(rhs)) => {
                             result = Token::String(format!("{}{}", lhs, rhs));
                         },
 
-                        (Token::Number(lhs), Token::String(rhs)) => {
+                        (Token::Integer(lhs), Token::String(rhs)) => {
                             result = Token::String(format!("{}{}", lhs, rhs));
                         },
 
@@ -676,7 +738,7 @@ impl Parser {
                         
                         _ => {
                             return Err(ParseError::TypeMismatch {
-                                expected: Token::TypeNumber,
+                                expected: Token::TypeInt,
                                 found: next_term,
                             });
                         }
@@ -688,12 +750,15 @@ impl Parser {
                     // Parse the next term.
                     let next_term = self.parse_term()?;
                     // Type-check and perform the operation.
-                    if let (Token::Number(lhs), Token::Number(rhs)) = (&result, &next_term) {
-                        result = Token::Number(lhs - rhs);
+                    if let (Token::Integer(lhs), Token::Integer(rhs)) = (&result, &next_term) {
+                        result = Token::Integer(lhs - rhs);
+                    } else if let (Token::Float(lhs), Token::Float(rhs)) = (&result, &next_term) {
+                        result = Token::Float(lhs - rhs);
+                        
                     } else {
                         // Error: "Cannot subtract {type} from {type}"
                         return Err(ParseError::TypeMismatch {
-                            expected: Token::TypeNumber,
+                            expected: Token::TypeInt,
                             found: next_term,
                         });
                     }
@@ -719,11 +784,13 @@ impl Parser {
                     // Parse the next factor.
                     let next_factor = self.parse_factor()?;
                     // Type-check and perform the operation.
-                    if let (Token::Number(lhs), Token::Number(rhs)) = (&result, &next_factor) {
-                        result = Token::Number(lhs * rhs);
+                    if let (Token::Integer(lhs), Token::Integer(rhs)) = (&result, &next_factor) {
+                        result = Token::Integer(lhs * rhs);
+                    } else if let (Token::Float(lhs), Token::Float(rhs)) = (&result, &next_factor) {
+                        result = Token::Float(lhs * rhs);
                     } else {
                         return Err(ParseError::TypeMismatch {
-                            expected: Token::TypeNumber,
+                            expected: Token::TypeInt,
                             found: next_factor,
                         });
                     }
@@ -733,13 +800,17 @@ impl Parser {
                     // Parse the next factor.
                     let next_factor = self.parse_factor()?;
                     // Type-check and perform the operation.
-                    if let (Token::Number(lhs), Token::Number(rhs)) = (&result, &next_factor) {
+                    if let (Token::Integer(lhs), Token::Integer(rhs)) = (&result, &next_factor) {
                         // Note: This will panic if `rhs` is 0.
                         // A real language should handle this division-by-zero error.
-                        result = Token::Number(lhs / rhs);
+                        result = Token::Integer(lhs / rhs);
+                    } else if let (Token::Float(lhs), Token::Float(rhs)) = (&result, &next_factor) {
+                        // Note: This will panic if `rhs` is 0.
+                        // A real language should handle this division-by-zero error.
+                        result = Token::Float(lhs / rhs);
                     } else {
                         return Err(ParseError::TypeMismatch {
-                            expected: Token::TypeNumber,
+                            expected: Token::TypeInt,
                             found: next_factor,
                         });
                     }
@@ -758,7 +829,7 @@ impl Parser {
             None => {
                 // Reached end of input unexpectedly.
                 return Err(ParseError::UnexpectedToken {
-                    expected: Token::Number(0), // Placeholder
+                    expected: Token::Integer(0), // Placeholder
                     found: None,
                 });
             }
@@ -766,10 +837,16 @@ impl Parser {
 
         match tok {
             // A literal number.
-            Token::Number(n) => {
-                self.eat(Token::Number(n))?;
-                Ok(Token::Number(n))
+            Token::Integer(n) => {
+                self.eat(Token::Integer(n))?;
+                Ok(Token::Integer(n))
             }
+
+            Token::Float(f) => {
+                self.eat(Token::Float(f))?;
+                Ok(Token::Float(f))
+            }
+
             // A literal string.
             Token::String(s) => {
                 self.eat(Token::String(s.clone()))?;
@@ -790,12 +867,14 @@ impl Parser {
                 self.eat(Token::Minus)?;
                 let value_token = self.parse_factor()?;
                 // Apply the negation.
-                if let Token::Number(n) = value_token {
-                    Ok(Token::Number(-n))
+                if let Token::Integer(n) = value_token {
+                    Ok(Token::Integer(-n))
+                } else if let Token::Float(f) = value_token {
+                    Ok(Token::Float(-f))
                 } else {
                     // Error: "Cannot apply unary minus to {type}"
                     Err(ParseError::TypeMismatch {
-                        expected: Token::TypeNumber,
+                        expected: Token::TypeInt,
                         found: value_token,
                     })
                 }
@@ -807,10 +886,43 @@ impl Parser {
                 self.eat(Token::RParen)?; // Consume ')'
                 Ok(result) // Return the result of the inner expression.
             }
+            // Brackets (e.g., "[string "hello world", int 20]").
+            Token::LBracket => {    
+                // Consume the opening bracket '['.
+                self.eat(Token::LBracket)?;
+                
+                // A vector to hold the parsed elements of the list.
+                let mut elements: Vec<Token> = Vec::new(); 
+
+                // Check if the list is empty (i.e., next token is immediately ']').
+                if self.current_token() != Some(&Token::RBracket) {
+                    loop {
+                        // Parse the expression for the current element (e.g., 10, "text", 5+5).
+                        let element = self.parse_expr()?;
+                        elements.push(element);
+
+                        // If there is a comma, consume it and parse the next element.
+                        // Otherwise, we reached the end of the list elements.
+                        if let Some(Token::Comma) = self.current_token() {
+                            self.eat(Token::Comma)?;
+                        } else {
+                            break;
+                        }
+                    }
+                }
+
+                // Consume the closing bracket ']'.
+                self.eat(Token::RBracket)?;
+                
+                // Wrap the collected elements in a Token::List and return.
+                Ok(Token::List(elements))
+            }
             // A variable.
             Token::Identifier(name) => {
                 if let Some(Token::LParen) = self.peek() {
                     self.parse_function_call(&name)
+                } else if let Some(Token::LBracket) = self.peek() {
+                    self.parse_list_index(&name)
                 } else {
                     
                     self.eat(Token::Identifier(name.clone()))?;
@@ -828,7 +940,7 @@ impl Parser {
             _ => {
                 println!("error here");
                 Err(ParseError::UnexpectedToken {
-                    expected: Token::Number(0), // Placeholder
+                    expected: Token::Integer(0), // Placeholder
                     found: Some(tok),
                 })
             }
