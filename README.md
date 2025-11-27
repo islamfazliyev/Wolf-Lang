@@ -50,13 +50,30 @@ for int i = 1 range 10
 end
 ```
 
+**Functions and return**
+
+```rust
+fn calc(x, y)
+   print a + b
+end
+
+calc(10, 30)
+```
+
+```rust
+fn calc(x, y)
+   return a + b
+end
+
+let int result = calc(10, 30)
+print result
+print calc(10, 10)
+```
+
 ## Planned Features
-- Control flow: `if`, `while`, `for`
-- User-defined functions and lexical scoping
 - Lists, maps/dictionaries, modules
 - Coroutines / async support
 - FFI: Call C/Rust functions directly
-- Optional transpiler: Convert WolfLang to Lua or C
 
 ## Getting Started
 1. Clone the repository
