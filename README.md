@@ -128,6 +128,10 @@ end
 
 print fibonacci(10) # Output: 55
 ```
+check the docs for more information:
+
+[![Docs](https://img.shields.io/badge/Docs-docs-orange)](https://islamfazliyev.github.io/wolflang-docs/)
+
 ### 🗺️ Roadmap
 
 [x] v0.1 (Current): Core Logic, Functions, Arrays, Embedding API.
