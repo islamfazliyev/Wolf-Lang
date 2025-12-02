@@ -3,12 +3,12 @@
 # ----------------------------------------
 
 # 1. Global State
-let int player_hp = 100
-let int enemy_hp = 150
-let bool game_running = true
+let player_hp: int = 100
+let enemy_hp: int = 150
+let game_running: bool = true
 
 # Inventory System (Using Lists)
-let list inventory = ["Potion", "Potion", "Bomb"]
+let inventory: list<string> = ["Potion", "Potion", "Bomb"]
 
 # ----------------------------------------
 # 2. Helper Functions
@@ -32,14 +32,14 @@ fn show_hud(p_hp, e_hp)
 end
 
 fn use_item()
-    let int count = inventory.len()
+    let count: int = inventory.len()
     if count == 0
         print "Inventory is empty!"
         return 0
     end
 
     # Pop the last item (List Method test)
-    let string item = inventory.pop()
+    let item: string = inventory.pop()
     print "Used item: ", item
 
     if item == "Potion"
@@ -60,7 +60,6 @@ end
 # ----------------------------------------
 
 print "A wild WOLF appears!"
-
 while game_running == true
     show_hud(player_hp, enemy_hp)
     
@@ -70,7 +69,7 @@ while game_running == true
     print "4. Run"
 
     # Native Input function
-    let string choice = input("Choose action: ")
+    let choice: string = input("Choose action: ")
 
     # --- PLAYER TURN ---
     if choice == "1"
@@ -81,13 +80,13 @@ while game_running == true
     if choice == "2"
         print "Channeling magic power..."
         # Calls the recursive function
-        let int dmg = charge_magic(8) 
+        let dmg: int = charge_magic(8) 
         print "CAST SPELL! Damage: ", dmg
         enemy_hp = enemy_hp - dmg
     end
 
     if choice == "3"
-        let int effect = use_item()
+        let effect: int = use_item()
         
         if effect == 500
             enemy_hp = enemy_hp - 50

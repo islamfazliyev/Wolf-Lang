@@ -30,7 +30,7 @@ pub fn lexer(content: &str) -> Result<Vec<Token>, String> {
                 "float" => token.push(Token::TypeFloat),
                 "bool" => token.push(Token::TypeBool),
                 "string" => token.push(Token::TypeString),
-                "list" => token.push(Token::TypeList),
+                "list" => token.push(Token::TypeList(Box::new(Token::Unknown))),
                 "print" => token.push(Token::Print),
                 "true" => token.push(Token::Boolean(true)),
                 "false" => token.push(Token::Boolean(false)),
@@ -88,6 +88,7 @@ pub fn lexer(content: &str) -> Result<Vec<Token>, String> {
 
         // ---------- Operators ----------
         match c {
+            
             '=' => { 
                 if i + 1 < chars.len() && chars[i + 1] == '=' {
                     token.push(Token::Equals);
@@ -148,6 +149,7 @@ pub fn lexer(content: &str) -> Result<Vec<Token>, String> {
             '[' => { token.push(Token::LBracket); i += 1; continue; }
             ']' => { token.push(Token::RBracket); i += 1; continue; }
             ',' => { token.push(Token::Comma); i += 1; continue; }
+            ':' => { token.push(Token::Colon); i += 1; continue; }
             '.' => { token.push(Token::Dot); i += 1; continue; }
             _ => {}
         }

@@ -5,7 +5,7 @@ pub enum Token {
     TypeInt,
     TypeFloat,
     TypeBool,
-    TypeList,
+    TypeList(Box<Token>),
 
     // Keywords
     Let,
@@ -55,6 +55,8 @@ pub enum Token {
     EndOfCondition,
     Range,
     Comma,
+    Colon,
     Return,
+    Unknown,
     EOF,
 }

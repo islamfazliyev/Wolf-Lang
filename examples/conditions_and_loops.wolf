@@ -2,7 +2,7 @@ if 10 > 5
     print "10 is greater than 5"
 end
 
-let int x = 1
+let x: int = 1
 
 while x < 5
     print x + " is lesser than 5"

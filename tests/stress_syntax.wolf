@@ -1,1 +1,8 @@
-let string x = ([1,2,3]).pop()
+print unable_variable
+
+let number: int = "this is text"
+
+if 10 > 5
+    print "this area not gonna stop"
+
+let x: int = 10 + * / 5

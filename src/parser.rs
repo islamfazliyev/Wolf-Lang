@@ -1,4 +1,5 @@
-use std::{collections::HashMap, ptr::null, thread::Scope, vec};
+use core::borrow;
+use std::{collections::HashMap, convert::identity, ptr::null, thread::Scope, vec};
 
 use crate::{error_handler::ParseError, tokens::{self, Token}};
 
@@ -129,33 +130,9 @@ impl Parser {
         // These variables will hold the parts of the declaration as we parse them.
         let mut var_name: Option<String> = None;
         let mut assigned_value: Option<Token> = None;
-        let mut declared_type: Option<Token> = None;
+        
 
-        // After `let` → expect type (number/string/bool)
-        if let Some(next) = self.current_token() {
-            match next {
-                Token::TypeInt | Token::TypeString | Token::TypeBool | Token::TypeFloat | Token::TypeList => {
-                    declared_type = Some(next.clone());
-                    let ty = format!("{:?}", next);
-                    self.output.push(format!("type {}", ty));
-                    self.pos += 1; // consume type
-                }
-                _ => {
-                    // throw error
-                    return Err(ParseError::UnexpectedToken {
-                        expected: Token::TypeInt, // just a placeholder
-                        found: Some(next.clone()),
-                    })
-                }
-            }
-        } else {
-            return Err(ParseError::UnexpectedToken {
-                expected: Token::TypeInt,
-                found: None,
-            });
-        }
-
-        // After the type, we expect the name of the variable.
+        // After the idefnitifier, we expect the type of the variable.
         if let Some(next) = self.current_token() {
             match next {
                 Token::Identifier(name) => {
@@ -177,7 +154,11 @@ impl Parser {
             })
         }
 
-        // After identifier → expect '='
+        self.eat(Token::Colon)?;
+
+        let declared_type = self.parse_type()?;
+        self.output.push(format!("type {:?}", declared_type));
+        // After type → expect '='
         self.eat(Token::Assign)?;
 
         let assigned_value = self.parse_expr()?;
@@ -185,30 +166,88 @@ impl Parser {
 
 
         // Check if type and value matches or not 
-        if let Some(decl_ty) = declared_type.as_ref() {
-            let matches = match (decl_ty, &assigned_value) {
-                (Token::TypeBool, Token::Boolean(_)) => true,
-                (Token::TypeInt, Token::Integer(_)) => true,
-                (Token::TypeFloat, Token::Float(_)) => true,
-                (Token::TypeString, Token::String(_)) => true,
-                (Token::TypeList, Token::List(_)) => true,
-                _ => false
-            };
+        
+        let is_match = self.check_type_compatibility(&declared_type, &assigned_value);
 
-            // if doesn't match return error
-            if !matches {
-                return Err(ParseError::TypeMismatch {
-                    expected: decl_ty.clone(),
-                    found: assigned_value.clone(),
-                });
-            }
+        if !is_match {
+            return Err(ParseError::TypeMismatch {
+                expected: declared_type.clone(),
+                found: assigned_value.clone(),
+            });
         }
+        
 
         // If all parts are parsed successfully, define the variable in the current scope.
         if let Some(name) = var_name {
             self.define_variable(name, assigned_value); 
         }
         Ok(())
+    }
+
+    fn parse_type(&mut self) -> Result<Token, ParseError> {
+        // After `idenitifier` → expect type (number/string/bool)
+        if let Some(next) = self.current_token().cloned() {
+            match next {
+                Token::TypeInt | Token::TypeString | Token::TypeBool | Token::TypeFloat => {
+                    self.pos += 1;
+                    Ok(next)
+                }
+
+                Token::TypeList(_) => {
+                    self.pos += 1;
+                    self.eat(Token::Lesser)?;
+                    let inner_type = self.parse_type()?;
+                    self.eat(Token::Greater)?;
+
+                    Ok(Token::TypeList(Box::new(inner_type)))
+
+                },
+
+                _ => {
+                    // throw error
+                    Err(ParseError::UnexpectedToken {
+                        expected: Token::TypeInt, // Placeholder
+                        found: Some(next),
+                    })
+                }
+            }
+        } else {
+            return Err(ParseError::UnexpectedToken {
+                expected: Token::TypeInt,
+                found: None,
+            });
+        }
+        
+    }
+
+    fn check_type_compatibility(&mut self, expected: &Token, value: &Token) -> bool {
+        match (expected, value) {
+            
+            (Token::TypeInt, Token::Integer(_)) => true,
+            (Token::TypeString, Token::String(_)) => true,
+            (Token::TypeBool, Token::Boolean(_)) => true,
+            (Token::TypeFloat, Token::Float(_)) => true,
+
+            
+            (Token::TypeList(inner_rule), Token::List(elements)) => {
+                
+                if elements.is_empty() {
+                    return true;
+                }
+
+                for element in elements {
+            
+                    if !self.check_type_compatibility(inner_rule, element) {
+                        return false;
+                    }
+                }
+
+                true
+            },
+
+            
+            _ => false,
+        }
     }
 
     // Note: Typo in function name, should be "parse_assignment"
@@ -236,84 +275,148 @@ impl Parser {
     }
 
     fn parse_list_index(&mut self, list_name: &str) -> Result<Token, ParseError> {
-        self.eat(Token::Identifier(list_name.to_string()))?;
-        self.eat(Token::LBracket)?;
-        let index_expr = self.parse_expr()?;
         
-        self.eat(Token::RBracket)?;
-
-        let index_val = if let Token::Integer(n) = index_expr {
-            if n < 0 {
-                return Err(ParseError::UnkownType { 
-                    type_name: format!("Index cannot be negative: {}", n) 
-                });
-            }
-            n as usize
-        } else {
-            return Err(ParseError::TypeMismatch {
-                expected: Token::TypeInt,
-                found: index_expr,
-            });
-        };
-
-        let variable_token = self.get_variable(list_name)
+        let mut current_token = self.get_variable(list_name)
             .ok_or(ParseError::UndeclaredVariable { name: list_name.to_string() })?
             .clone();
+        
+        self.eat(Token::Identifier(list_name.to_string()))?;
 
-        if let Token::List(elements) = variable_token {
-            if index_val < elements.len() {
-                Ok(elements[index_val].clone())
+        while let Some(Token::LBracket) = self.current_token() {
+            self.eat(Token::LBracket)?; 
+            
+            let index_expr = self.parse_expr()?;
+            
+            self.eat(Token::RBracket)?; 
+
+            let index_val = if let Token::Integer(n) = index_expr {
+                if n < 0 {
+                    return Err(ParseError::UnkownType { 
+                        type_name: format!("Index cannot be negative: {}", n) 
+                    });
+                }
+                n as usize
             } else {
-                return Err(ParseError::UnkownType {
-                    type_name: format!("Index out of bounds! Index: {}, Length: {}", index_val, elements.len())
-                })
+                return Err(ParseError::TypeMismatch {
+                    expected: Token::TypeInt,
+                    found: index_expr,
+                });
+            };
+
+            match current_token {
+                Token::List(elements) => {
+                    if index_val < elements.len() {
+                        current_token = elements[index_val].clone();
+                    } else {
+                        return Err(ParseError::UnkownType {
+                            type_name: format!("Index out of bounds! Index: {}, Length: {}", index_val, elements.len())
+                        });
+                    }
+                },
+
+                _ => {
+                    return Err(ParseError::TypeMismatch {
+                        expected: Token::TypeList(Box::new(Token::Unknown)),
+                        found: current_token,
+                    })
+                }
             }
-        } else {
-            return Err(ParseError::TypeMismatch {
-                expected: Token::TypeList,
-                found: variable_token,
-            })
         }
+
+
+        Ok(current_token)
     }
 
     fn parse_list_assignment(&mut self, list_name: &str) -> Result<(), ParseError> {
         self.eat(Token::Identifier(list_name.to_string()))?;
-        self.eat(Token::LBracket)?;
-        let index_expr = self.parse_expr()?;
-        self.eat(Token::RBracket)?;
-        self.eat(Token::Assign)?;
+        let mut indices: Vec<usize> = Vec::new();
 
+        while let Some(Token::LBracket) = self.current_token(){
+            self.eat(Token::LBracket)?;
+            let index_expr = self.parse_expr()?;
+            self.eat(Token::RBracket)?;
+
+            if let Token::Integer(n) = index_expr {
+                if n < 0 {
+                    return Err(ParseError::UnkownType { 
+                        type_name: "Negative index cannot be used".to_string() 
+                    });
+                }
+                indices.push(n as usize);
+            } else {
+                return Err(ParseError::TypeMismatch { 
+                    expected: Token::TypeInt, 
+                    found: index_expr 
+                });
+            }
+        }
+
+        if indices.is_empty() {
+            return Err(ParseError::UnexpectedToken {
+                expected: Token::LBracket,
+                found: self.current_token().cloned(),
+            });
+        }
+
+        self.eat(Token::Assign)?;
         let new_value = self.parse_expr()?;
 
-        let index_val = if let Token::Integer(n) = index_expr {
-            if n < 0 { return Err(ParseError::UnkownType { type_name: "Negative index cannot be".to_string() }); }
-            n as usize
-        } else {
-            return Err(ParseError::TypeMismatch { expected: Token::TypeInt, found: index_expr });
-        };
-        
         for scope in self.scopes.iter_mut().rev() {
             if let Some(token) = scope.get_mut(list_name) {
                 
-                if let Token::List(elements) = token {
-                    if index_val < elements.len() {
-                        elements[index_val] = new_value;
-                        return Ok(());
+                let mut current_target = token;
+                
+                for (i, &idx) in indices.iter().enumerate().take(indices.len() - 1) {
+                    match current_target {
+                        Token::List(elements) => {
+                            if idx < elements.len() {
+                                current_target = &mut elements[idx];
+                            } else {
+                                return Err(ParseError::UnkownType { 
+                                    type_name: format!("Index out of bounds at level {}! Index: {}, Length: {}", i, idx, elements.len()) 
+                                });
+                            }
+                        },
+                        _ => {
+                            return Err(ParseError::TypeMismatch { 
+                                expected: Token::TypeList(Box::new(Token::Unknown)), 
+                                found: current_target.clone() 
+                            });
+                        }
+                    }
+                }
+
+                let last_index = *indices.last().unwrap();
+
+                if let Token::List(elements) = current_target {
+                    if last_index < elements.len() {
+                        
+                        let old_val = &elements[last_index];
+                        if std::mem::discriminant(old_val) == std::mem::discriminant(&new_value) {
+                            elements[last_index] = new_value;
+                            return Ok(());
+                        } else {
+                            return Err(ParseError::TypeMismatch { 
+                                expected: old_val.clone(), 
+                                found: new_value 
+                            });
+                        }
                     } else {
                         return Err(ParseError::UnkownType { 
-                            type_name: format!("Index out of bounds: {} (Len: {})", index_val, elements.len()) 
+                            type_name: format!("Index out of bounds! Index: {}, Length: {}", last_index, elements.len()) 
                         });
                     }
                 } else {
                     return Err(ParseError::TypeMismatch { 
-                        expected: Token::TypeList, 
-                        found: token.clone() 
+                        expected: Token::TypeList(Box::new(Token::Unknown)), 
+                        found: current_target.clone() 
                     });
                 }
             }
         }
 
         Err(ParseError::UndeclaredVariable { name: list_name.to_string() })
+        
     }
 
     /// Parses a 'print' statement. e.g., print "Hello", 10 + 5
@@ -349,19 +452,16 @@ impl Parser {
             Token::Integer(n) => print!("{:?} ", n),
             Token::Float(f) => print!("{:?} ", f),
             Token::Boolean(b) => print!("{:?} ", b),
+            Token::List(elements) => {
+                for (i, element) in elements.iter().enumerate() {
+                    self.print_token_value(element)?;
+                }
+            },
             // If it's an identifier, we need to look up its value.
             Token::Identifier(name) => {
                 if let Some(value_token) = self.get_variable(name) {
-                    // Found the variable, now print its stored value.
-                    match value_token {
-                        Token::String(s) => print!("{:?} ", s),
-                        Token::Integer(n) => print!("{:?} ", n),
-                        Token::Float(f) => print!("{:?} ", f),
-                        Token::Boolean(b) => print!("{:?} ", b),
-                        _ => {} // Should not happen if types are managed correctly
-                    }
+                    self.print_token_value(value_token)?;
                 } else {
-                    // Tried to print a variable that doesn't exist.
                     return Err(ParseError::UndeclaredVariable { name: name.clone() });
                 }
             }

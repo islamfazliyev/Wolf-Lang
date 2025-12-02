@@ -1,7 +1,7 @@
-let int number = 1
-let float number2 = 1.1
-let string text = "hello world"
-let bool condition = true
+let number: int = 1
+let number2: float = 1.1
+let text: string = "hello world"
+let condition: bool = true
 
 
 print number

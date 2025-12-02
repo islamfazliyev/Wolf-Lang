@@ -3,8 +3,8 @@
 # Function to print the list nicely
 fn print_list(title, li)
     print "--- " + title + " ---"
-    let int i = 0
-    let int length = li.len()
+    let i: int = 0
+    let length: int = li.len()
     
     while i < length
         print "[" + i + "]: " + li[i]
@@ -15,19 +15,19 @@ end
 
 # Bubble Sort Algorithm (Ascending Order)
 fn bubble_sort(arr)
-    let int n = arr.len()
-    let int i = 0
+    let n: int = arr.len()
+    let i: int = 0
 
     # Outer loop: Moves the largest element to the end
     while i < n
-        let int j = 0
-        let int limit = n - i - 1
+        let j: int = 0
+        let limit: int = n - i - 1
         
         # Inner loop: Compare adjacent elements
         while j < limit
-            let int left = arr[j]
-            let int right_index = j + 1
-            let int right = arr[right_index]
+            let left: int = arr[j]
+            let right_index: int = j + 1
+            let right: int = arr[right_index]
 
             # If left is greater than right, SWAP them
             if left > right
@@ -47,7 +47,7 @@ end
 # --- MAIN SCENARIO ---
 
 # 1. Create a mixed score list
-let list scores = [450, 120, 890, 30]
+let scores: list<int> = [450, 120, 890, 30]
 
 # 2. Add new scores dynamically (push test)
 print "Adding new scores..."
@@ -63,5 +63,5 @@ scores = bubble_sort(scores)
 
 print_list("SORTED LIST (High Score)", scores)
 
-let int highest = scores.pop() 
+let highest: int = scores.pop() 
 print "Removed (Highest Score): ", highest

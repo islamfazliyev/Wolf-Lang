@@ -1,5 +1,0 @@
-let int x = 10
-
-x = 10.12
-
-print x

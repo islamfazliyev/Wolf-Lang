@@ -1,9 +1,9 @@
-let list lines = []
+let lines: list<string> = []
 
 fn write()
-    let int i = 0
+    let i: int = 0
     while 0 < 1
-        let string in = input(">")
+        let in: string = input(">")
         if in == "all()"
             read()
         end
@@ -12,8 +12,8 @@ fn write()
 end
 
 fn read()
-    let int line_length = lines.len()
-    line_length = line_length
+    let line_length: int = lines.len()
+    # Gereksiz atama kaldırıldı: line_length = line_length
     print line_length
     for int i = 0 range line_length
         print lines[i]

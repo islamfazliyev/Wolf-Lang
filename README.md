@@ -17,7 +17,6 @@ WolfLang is designed for **scripting**, **quick prototyping**, and **embedding**
 ## ✨ Features (v0.1)
 
 - 📦 **Embeddable Architecture:** Designed to be used as a crate in Rust projects.
-- 🛡️ **Static Typing:** Catch type errors before runtime (Int, Float, String, Bool, List).
 - 🧠 **Smart Memory Management:** Scope-based memory handling with no garbage collector lag.
 - 🔄 **Recursion Support:** Full support for recursive functions.
 - 🎒 **Dynamic Arrays:** Create, index, and mutate lists (`push`, `pop`, `len`).

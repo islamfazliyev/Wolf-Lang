@@ -1,13 +1,13 @@
 print "Scope Hell Starting..."
 
-let int x = 0
-let int target = 10000
+let x: int = 0
+let target: int = 10000
 
 while x < target
     
-    let int y = x * 2
-    let int z = y + 5
-    let string cop = "this needs to be deleted on memory"
+    let y: int = x * 2
+    let z: int = y + 5
+    let cop: string = "this needs to be deleted on memory"
     
     x = x + 1
 end

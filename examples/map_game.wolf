@@ -1,0 +1,78 @@
+let map: list<list<int>> = [
+    [1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+    [1, 2, 0, 0, 1, 1, 0, 0, 0, 1],
+    [1, 0, 1, 0, 0, 0, 0, 1, 0, 1],
+    [1, 0, 0, 0, 1, 1, 0, 0, 0, 1],
+    [1, 1, 0, 1, 1, 1, 1, 0, 1, 1],
+    [1, 1, 0, 1, 1, 1, 1, 0, 1, 1],
+    [1, 0, 0, 0, 1, 1, 0, 0, 0, 1],
+    [1, 0, 1, 0, 0, 0, 0, 3, 0, 1],
+    [1, 0, 0, 0, 1, 1, 0, 0, 0, 1],
+    [1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+]
+
+let py: int = 1
+let px: int = 1
+
+let is_player_alive: bool = true
+
+fn draw_map(pyd, pxd)
+    for int y = 0 range 10
+        let row_str: string = ""
+        for int x = 0 range 10
+            if map[y][x] == 1
+                row_str = row_str + "w "
+            end
+            if map[y][x] == 2
+                row_str = row_str + "P "
+            end
+            if map[y][x] == 3
+                row_str = row_str + "T "
+            end
+            if map[y][x] == 0
+                row_str = row_str + ". "
+            end
+        end
+        
+        print row_str
+    end
+end
+
+
+while is_player_alive == true
+    clear()
+    draw_map(py, px)
+    let in: string = input("WASD: ")
+    let ppx: int = px
+    let ppy: int = py
+    if in == "s"
+        map[py][px] = 0
+        py = py + 1
+    end
+
+    if in == "w"
+        map[py][px] = 0
+        py = py - 1
+    end
+
+    if in == "a"
+        map[py][px] = 0
+        px = px - 1
+    end
+
+    if in == "d"
+        map[py][px] = 0
+        px = px + 1
+    end
+    if map[py][px] == 1
+        map[py][px] = 1
+        px = ppx
+        py = ppy
+    end
+    if map[py][px] == 3
+        
+        print "player entered target!"
+        is_player_alive = false
+    end
+    map[py][px] = 2
+end

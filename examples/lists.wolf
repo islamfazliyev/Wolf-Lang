@@ -1,7 +1,16 @@
-let list type = [1, 2, 3, "str"]
+# <...> defines types inside of lists
+let type: list<int> = [1, 2, 3, 4] 
+# you can use list<list<...>> to create multiple lists
+let type2: list<list<int>> = [[1, 2, 3, 4], [1, 2, 3, 4], [1, 2, 3, 4]] 
 
 print type[2]
 
 type[2] = 5
 type[1] = 1
-print type[2], type[1], type[3]
+print type[2], type[1]
+
+#to change list inside of a list you need to use multiple brackets
+
+type2[1][1] = 5
+
+print type2[1][1], type2[0]
