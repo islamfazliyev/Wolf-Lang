@@ -76,21 +76,21 @@ fn main() {
 
 Variables & Types:
 ```rust
-let string name = "WolfLang"
-let int version = 1
-let float pi = 3.14
-let bool is_fast = true
+let name: string = "WolfLang"
+let version: int = 1
+let pi: float = 3.14
+let is_fast: bool = true
 ```
 
 Arrays
 ```rust
-let list inventory = ["Sword", "Shield"]
+let inventory: list<string> = ["Sword", "Shield"]
 
 # Methods
 inventory.push("Potion")
 print inventory[0] # Output: Sword
 
-let string item = inventory.pop()
+let item: string = inventory.pop()
 print "Used: " + item
 ```
 Control Flow
@@ -103,7 +103,7 @@ if version < 1
    print "Still in beta..."
 end
 
-let int i = 0
+let i: int = 0
 while i < 5
    print i
    i = i + 1
