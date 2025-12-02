@@ -25,7 +25,7 @@ end
 
 print "--- Binary Search Started ---"
 
-let int target = 90
+let int target = 70
 let int result = binary_search(target, 0, 9)
 
 if result == -1 

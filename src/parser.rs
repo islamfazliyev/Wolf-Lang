@@ -86,12 +86,13 @@ impl Parser {
     fn assign_variable(&mut self, name: &str, value: Token) -> Result<(), ParseError> {
         // .iter_mut().rev() iterates from the last scope (innermost) to the first (global).
         for scope in self.scopes.iter_mut().rev() {
-            if scope.contains_key(name) {
+            if let Some(existing_val) = scope.get_mut(name) {
                 // Found the variable.
                 let existing_val = scope.get_mut(name).unwrap();
                 
                 // Check if the *type* (enum variant) of the new value matches the old one.
                 if std::mem::discriminant(existing_val) == std::mem::discriminant(&value) {
+                    
                     // Types match, update the value.
                     *existing_val = value;
                     return Ok(());
@@ -1183,7 +1184,7 @@ impl Parser {
                         // We must "peek" to see what comes next.
                         if let Some(Token::Assign) = self.peek() {
                             // If it's 'Identifier' followed by '=', it's an assignment.
-                            self.parse_assigment(); // Typo: parse_assignment
+                            self.parse_assigment()?; // Typo: parse_assignment
                             Ok(())
                         } 
                         else if let Some(Token::LParen) = self.peek() {

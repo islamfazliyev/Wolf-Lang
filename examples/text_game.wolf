@@ -47,11 +47,9 @@ fn use_item()
         return 30
     end
     
-    if iteToken::Integer(i) => print!("{}", i),
-            Token::Float(f) => print!("{}", f),
-            Token::Boolean(b) => print!("{}", b),m == "Bomb"
+    if item == "Bomb"
         print "BOOM! Dealt 50 damage to enemy!"
-        return 500 # Code 500 means damage to enemy
+        return 500
     end
 
     return 0

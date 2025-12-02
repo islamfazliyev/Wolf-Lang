@@ -1,8 +1,1 @@
-print unable_variable
-
-let int number = "this is text"
-
-if 10 > 5
-    print "this area not gonna stop"
-
-let int x = 10 + * / 5
+let string x = ([1,2,3]).pop()
