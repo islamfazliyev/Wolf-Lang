@@ -1,4 +1,3 @@
-use core::borrow;
 use std::{collections::HashMap, convert::identity, ptr::null, thread::Scope, vec};
 
 use crate::{error_handler::ParseError, tokens::{self, Token}};
@@ -976,6 +975,7 @@ impl Parser {
                 _ => break,
             }
         }
+        
         Ok(result)
     }
 
