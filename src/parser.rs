@@ -1,6 +1,6 @@
 use std::{collections::HashMap, convert::identity, ptr::null, thread::Scope, vec};
 
-use crate::{error_handler::ParseError, tokens::{self, Token}};
+use crate::{ast::Stmt, ast::LiteralValue, ast::Expr, error_handler::ParseError, tokens::{self, Token}};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Function {
@@ -29,6 +29,16 @@ impl Parser {
             // Initialize with one, global scope.
             scopes: vec![HashMap::new()],
             functions: HashMap::new(),
+        }
+    }
+
+    fn token_to_literal(&self, token: Token) -> LiteralValue {
+        match token {
+            Token::Integer(n) => LiteralValue::Int(n),
+            Token::Float(f) => LiteralValue::Float(f),
+            Token::String(s) => LiteralValue::Str(s),
+            Token::Boolean(b) => LiteralValue::Bool(b),
+            _ => LiteralValue::Nil,
         }
     }
 
@@ -122,36 +132,20 @@ impl Parser {
     
     /// Parses a variable declaration statement like 'let int x = 10'.
     /// A 'let' statement must follow the structure: let <type> <identifier> = <value>
-    pub fn parse_let(&mut self) -> Result<(), ParseError> {
+    pub fn parse_let(&mut self) -> Result<Stmt, ParseError> {
         // Consume the 'let' keyword to start the statement.
         self.eat(Token::Let)?;
 
-        // These variables will hold the parts of the declaration as we parse them.
-        let mut var_name: Option<String> = None;
-        let mut assigned_value: Option<Token> = None;
-        
 
-        // After the idefnitifier, we expect the type of the variable.
-        if let Some(next) = self.current_token() {
-            match next {
-                Token::Identifier(name) => {
-                    var_name = Some(name.clone());
-                    self.output.push(format!("var {}", name));
-                    self.pos += 1; // consume identifier
-                }
-                _ => {
-                    return Err(ParseError::UnexpectedToken {
-                        expected: Token::Identifier("x".to_string()),
-                        found: Some(next.clone()),
-                    })
-                }
-            }
+        let var_name = if let Some(Token::Identifier(name)) = self.current_token().cloned() {
+            self.pos += 1;
+            name
         } else {
             return Err(ParseError::UnexpectedToken {
-                expected: Token::Identifier("x".to_string()),
-                found: None,
-            })
-        }
+                expected: Token::Identifier("name".to_string()),
+                found: self.current_token().cloned(),
+            });
+        };
 
         self.eat(Token::Colon)?;
 
@@ -160,27 +154,14 @@ impl Parser {
         // After type → expect '='
         self.eat(Token::Assign)?;
 
-        let assigned_value = self.parse_expr()?;
+        let value_expr = self.parse_expr()?;
 
-
-
-        // Check if type and value matches or not 
+        Ok(Stmt::Let {
+            name: var_name,
+            data_type: declared_type,
+            value: value_expr,
+        })
         
-        let is_match = self.check_type_compatibility(&declared_type, &assigned_value);
-
-        if !is_match {
-            return Err(ParseError::TypeMismatch {
-                expected: declared_type.clone(),
-                found: assigned_value.clone(),
-            });
-        }
-        
-
-        // If all parts are parsed successfully, define the variable in the current scope.
-        if let Some(name) = var_name {
-            self.define_variable(name, assigned_value); 
-        }
-        Ok(())
     }
 
     fn parse_type(&mut self) -> Result<Token, ParseError> {
@@ -250,197 +231,88 @@ impl Parser {
     }
 
     // Note: Typo in function name, should be "parse_assignment"
-    fn parse_assigment(&mut self) -> Result<(), ParseError> {
-        // `sense()` already checked that the current token is an Identifier.
+    fn parse_assigment(&mut self) -> Result<Stmt, ParseError> {
+        // 1. Get the variable name
         let var_name = if let Some(Token::Identifier(name)) = self.current_token().cloned() {
-            self.pos += 1; // Consume the identifier
+            self.pos += 1;
             name
         } else {
-            unreachable!(); // Should not happen if called from `sense()`
+            return Err(ParseError::UnexpectedToken {
+                expected: Token::Identifier("variable name".to_string()),
+                found: self.current_token().cloned(),
+            });
         };
 
-        // `sense()` already checked that the next token is Assign.
-        // We should use `?` to propagate errors from `eat`.
+        // 2. Consume '='
         self.eat(Token::Assign)?;
-        
-        // Parse the expression on the right-hand side.
-        let new_value_token = self.parse_expr()?;
 
-        // Try to assign the new value, which also handles type checking.
-        // We should also propagate the result of `assign_variable`.
-        self.assign_variable(&var_name, new_value_token)?;
-        
-        Ok(())
+        // 3. Parse the value (the right-hand side)
+        let value_expr = self.parse_expr()?;
+
+        // 4. Return an Expression Statement containing the Assignment Expression
+        // This wraps the assignment logic into a statement so it can sit in a block.
+        Ok(Stmt::Expression(Expr::Assign {
+            name: var_name,
+            value: Box::new(value_expr),
+        }))
     }
 
-    fn parse_list_index(&mut self, list_name: &str) -> Result<Token, ParseError> {
-        
-        let mut current_token = self.get_variable(list_name)
-            .ok_or(ParseError::UndeclaredVariable { name: list_name.to_string() })?
-            .clone();
-        
-        self.eat(Token::Identifier(list_name.to_string()))?;
+    fn parse_list_index(&mut self, list_name: String) -> Result<Expr, ParseError> {
+        // Start with the variable: 'arr'
+        let mut current_expr = Expr::Variable(list_name);
 
-        while let Some(Token::LBracket) = self.current_token() {
+        // While we see '['...
+        while self.check(Token::LBracket) {
             self.eat(Token::LBracket)?; 
             
+            // Parse the index expression (e.g., 5 + x)
             let index_expr = self.parse_expr()?;
             
             self.eat(Token::RBracket)?; 
 
-            let index_val = if let Token::Integer(n) = index_expr {
-                if n < 0 {
-                    return Err(ParseError::UnkownType { 
-                        type_name: format!("Index cannot be negative: {}", n) 
-                    });
-                }
-                n as usize
-            } else {
-                return Err(ParseError::TypeMismatch {
-                    expected: Token::TypeInt,
-                    found: index_expr,
-                });
+            // Wrap the current expression in an Index node
+            // arr[0] becomes Index(arr, 0)
+            // arr[0][1] becomes Index(Index(arr, 0), 1)
+            current_expr = Expr::Index {
+                list: Box::new(current_expr),
+                index: Box::new(index_expr),
             };
-
-            match current_token {
-                Token::List(elements) => {
-                    if index_val < elements.len() {
-                        current_token = elements[index_val].clone();
-                    } else {
-                        return Err(ParseError::UnkownType {
-                            type_name: format!("Index out of bounds! Index: {}, Length: {}", index_val, elements.len())
-                        });
-                    }
-                },
-
-                _ => {
-                    return Err(ParseError::TypeMismatch {
-                        expected: Token::TypeList(Box::new(Token::Unknown)),
-                        found: current_token,
-                    })
-                }
-            }
         }
 
-
-        Ok(current_token)
+        Ok(current_expr)
     }
 
-    fn parse_list_assignment(&mut self, list_name: &str) -> Result<(), ParseError> {
-        self.eat(Token::Identifier(list_name.to_string()))?;
-        let mut indices: Vec<usize> = Vec::new();
+    fn parse_list_assignment(&mut self, list_name: String) -> Result<Stmt, ParseError> {
+        let mut indices = Vec::new();
 
-        while let Some(Token::LBracket) = self.current_token(){
+        // 1. Collect all indices: [0][1]...
+        while self.check(Token::LBracket) {
             self.eat(Token::LBracket)?;
-            let index_expr = self.parse_expr()?;
+            indices.push(self.parse_expr()?);
             self.eat(Token::RBracket)?;
-
-            if let Token::Integer(n) = index_expr {
-                if n < 0 {
-                    return Err(ParseError::UnkownType { 
-                        type_name: "Negative index cannot be used".to_string() 
-                    });
-                }
-                indices.push(n as usize);
-            } else {
-                return Err(ParseError::TypeMismatch { 
-                    expected: Token::TypeInt, 
-                    found: index_expr 
-                });
-            }
         }
 
-        if indices.is_empty() {
-            return Err(ParseError::UnexpectedToken {
-                expected: Token::LBracket,
-                found: self.current_token().cloned(),
-            });
-        }
-
+        // 2. Expect Assignment '='
         self.eat(Token::Assign)?;
-        let new_value = self.parse_expr()?;
 
-        for scope in self.scopes.iter_mut().rev() {
-            if let Some(token) = scope.get_mut(list_name) {
-                
-                let mut current_target = token;
-                
-                for (i, &idx) in indices.iter().enumerate().take(indices.len() - 1) {
-                    match current_target {
-                        Token::List(elements) => {
-                            if idx < elements.len() {
-                                current_target = &mut elements[idx];
-                            } else {
-                                return Err(ParseError::UnkownType { 
-                                    type_name: format!("Index out of bounds at level {}! Index: {}, Length: {}", i, idx, elements.len()) 
-                                });
-                            }
-                        },
-                        _ => {
-                            return Err(ParseError::TypeMismatch { 
-                                expected: Token::TypeList(Box::new(Token::Unknown)), 
-                                found: current_target.clone() 
-                            });
-                        }
-                    }
-                }
+        // 3. Parse the value to assign
+        let value = self.parse_expr()?;
 
-                let last_index = *indices.last().unwrap();
-
-                if let Token::List(elements) = current_target {
-                    if last_index < elements.len() {
-                        
-                        let old_val = &elements[last_index];
-                        if std::mem::discriminant(old_val) == std::mem::discriminant(&new_value) {
-                            elements[last_index] = new_value;
-                            return Ok(());
-                        } else {
-                            return Err(ParseError::TypeMismatch { 
-                                expected: old_val.clone(), 
-                                found: new_value 
-                            });
-                        }
-                    } else {
-                        return Err(ParseError::UnkownType { 
-                            type_name: format!("Index out of bounds! Index: {}, Length: {}", last_index, elements.len()) 
-                        });
-                    }
-                } else {
-                    return Err(ParseError::TypeMismatch { 
-                        expected: Token::TypeList(Box::new(Token::Unknown)), 
-                        found: current_target.clone() 
-                    });
-                }
-            }
-        }
-
-        Err(ParseError::UndeclaredVariable { name: list_name.to_string() })
-        
+        // 4. Return the Statement
+        Ok(Stmt::ListAssign {
+            list_name,
+            indices,
+            value,
+        })
     }
 
     /// Parses a 'print' statement. e.g., print "Hello", 10 + 5
-    fn parse_print(&mut self) -> Result<(), ParseError> {
-        // Consume the 'print' keyword.
+    fn parse_print(&mut self) -> Result<Stmt, ParseError> {
         self.eat(Token::Print)?;
 
-        // Parse the first expression to be printed.
-        let first_value = self.parse_expr()?;
-        self.print_token_value(&first_value)?; 
+        let value = self.parse_expr()?;
 
-        // Loop as long as we see commas, allowing for multiple arguments.
-        while let Some(Token::Comma) = self.current_token() {
-            self.eat(Token::Comma)?; // Consume the comma
-
-            // Parse the next expression.
-            let next_value = self.parse_expr()?;
-            // Print its value.
-            self.print_token_value(&next_value)?;
-        }
-
-        // Print a newline after the statement is done.
-        println!(); 
-
-        Ok(())
+        Ok(Stmt::Print(value))
     }
 
     /// Helper function for `parse_print` to handle the actual printing.
@@ -474,150 +346,9 @@ impl Parser {
     }
 
     /// Parses a condition (e.g., 'x > 10', 'name == "iso"').
-    fn parse_condition(&mut self) -> Result<bool, ParseError> {
-        let mut left = self.parse_logic_and()?;
-
-        while let Some(Token::Or) = self.current_token() {
-            self.eat(Token::Or)?;
-            let right = self.parse_logic_and()?;
-        
-            left = left || right;
-        }
-
-        Ok(left)
+    fn parse_condition(&mut self) -> Result<Expr, ParseError> {
+        self.parse_logic_or()
     }
-
-    fn parse_comprasion(&mut self) -> Result<bool, ParseError> {
-        // Parse the left-hand side of the comparison.
-        let lhs_token = self.parse_expr()?;
-
-        // Get the comparison operator.
-        let op_token_opt = self.current_token().cloned();
-
-        if let Some(op_token) = op_token_opt {
-            match op_token {
-                // Check if it's a valid comparison operator.
-                Token::Equals | Token::NotEquals | Token::Greater | 
-                Token::Lesser | Token::GreaterEquals | Token::LesserEquals => {
-                    // Consume the operator.
-                    self.pos += 1;
-
-                    // Parse the right-hand side.
-                    let rhs_token = self.parse_expr()?;
-                    
-                    // Perform type-checked comparison.
-                    match (&lhs_token, &rhs_token) {
-                        // Both are numbers.
-                        (Token::Integer(lhs), Token::Integer(rhs)) => {
-                            let result = match op_token {
-                                Token::Equals => lhs == rhs,
-                                Token::NotEquals => lhs != rhs,
-                                Token::Greater => lhs > rhs,
-                                Token::Lesser => lhs < rhs,
-                                Token::GreaterEquals => lhs >= rhs,
-                                Token::LesserEquals => lhs <= rhs,
-                                _ => unreachable!(), // We matched these tokens above
-                            };
-                            return Ok(result);
-                        }
-
-                        (Token::Float(lhs), Token::Float(rhs)) => {
-                            let result = match op_token {
-                                Token::Equals => lhs == rhs,
-                                Token::NotEquals => lhs != rhs,
-                                Token::Greater => lhs > rhs,
-                                Token::Lesser => lhs < rhs,
-                                Token::GreaterEquals => lhs >= rhs,
-                                Token::LesserEquals => lhs <= rhs,
-                                _ => unreachable!(), // We matched these tokens above
-                            };
-                            return Ok(result);
-                        }
-
-                        // Both are strings.
-                        (Token::String(lhs), Token::String(rhs)) => {
-                            let result = match op_token {
-                                Token::Equals => lhs == rhs,
-                                Token::NotEquals => lhs != rhs,
-                                // Other comparisons (>, <) are not allowed for strings.
-                                _ => {
-                                    return Err(ParseError::UnexpectedToken {
-                                        expected: Token::Equals, // or NotEquals
-                                        found: Some(op_token),
-                                    })
-                                },
-                            };
-                            return Ok(result);
-                        }
-                        // Both are booleans.
-                        (Token::Boolean(lhs), Token::Boolean(rhs)) => {
-                            let result = match op_token {
-                                Token::Equals => lhs == rhs,
-                                Token::NotEquals => lhs != rhs,
-                                // Other comparisons (>, <) are not allowed for booleans.
-                                _ => {
-                                    return Err(ParseError::UnexpectedToken {
-                                        expected: Token::Equals, // or NotEquals
-                                        found: Some(op_token),
-                                    })
-                                },
-                            };
-                            return Ok(result);
-                        }
-
-                        (Token::List(lhs), Token::List(rhs)) => {
-                            let result = match op_token {
-                                Token::Equals => lhs == rhs,
-                                Token::NotEquals => lhs != rhs,
-                                
-                                _ => {
-                                    return Err(ParseError::UnexpectedToken {
-                                        expected: Token::Equals,
-                                        found: Some(op_token),
-                                    })
-                                },
-                            };
-                            return Ok(result);
-                        }
-                        // Types do not match (e.g., comparing a number to a string).
-                        _ => {
-                            Err(ParseError::TypeMismatch { expected: lhs_token, found: rhs_token })
-                        }
-                    }
-
-                }
-                // Not a comparison operator, fall through to the error.
-                _ => {
-                    if let Token::Boolean(b) = lhs_token {
-                        Ok(b)
-                    } else {
-                        Err(ParseError::TypeMismatch { expected: Token::TypeBool, found: Token::Unknown })
-                    }
-                }
-            }
-        } else {
-            if let Token::Boolean(b) = lhs_token {
-                Ok(b)
-            } else {
-                Err(ParseError::TypeMismatch { expected: Token::TypeBool, found: Token::Unknown })
-            }
-        }
-    }
-
-    fn parse_logic_and(&mut self) -> Result<bool, ParseError> {
-        let mut left = self.parse_comprasion()?;
-
-        while let Some(Token::And) = self.current_token() {
-            self.eat(Token::And)?;
-
-            let right = self.parse_comprasion()?;
-
-            left = left && right;
-        }
-
-        Ok(left)
-    }
-
     fn find_loop_block(&self, start_pos: usize) -> Result<(Vec<Token>, usize), ParseError> {
         let mut temp_pos = start_pos;
         let mut scope_depth = 1;
@@ -646,649 +377,462 @@ impl Parser {
         Ok((tokens, end_pos))
     }
 
+    fn parse_block(&mut self) -> Result<Vec<Stmt>, ParseError> {
+        let mut statements = Vec::new();
+        
+        while let Some(tok) = self.current_token().cloned() {
+            match tok {
+                Token::EndOfCondition | Token::Else => break,
+                Token::EOF => break,
+
+                _ => {
+                    statements.push(self.parse_statement()?);
+                }
+            }
+        }
+        Ok(statements)
+    }
+
     /// Parses an 'if' statement and its block.
-    fn parse_if(&mut self) -> Result<(), ParseError> {
-        // Consume the 'if' keyword.
+    fn parse_if(&mut self) -> Result<Stmt, ParseError> {
         self.eat(Token::If)?;
 
-        // Evaluate the condition.
-        let condition_result = self.parse_condition()?; 
-        
-        // --- Find the block of tokens belonging to this 'if' ---
-        let (block_tokens, end_of_loop_pos) = self.find_loop_block(self.pos)?;
-        
-        // We found the block. Advance the *main* parser's position to *after* the 'end'.
-        self.pos = end_of_loop_pos;
+        // 1. Parse Condition (returns Expr, doesn't evaluate it)
+        let condition = self.parse_condition()?;
 
-        // --- Execute the block if the condition was true ---
-        if condition_result {
-            // Create a new scope for the 'if' block.
-            self.scopes.push(HashMap::new());
-            
-            // Create a new, temporary parser just for the block's tokens.
-            let mut block_parser = Parser::new(block_tokens);
-            // Give it a *copy* of the current scopes (so it can read outer variables).
-            block_parser.scopes = self.scopes.clone(); 
-           
-            block_parser.functions = self.functions.clone();
+        // 2. Parse the "Then" block
+        // We keep parsing statements until we hit 'else' or 'end'
+        let then_stmts = self.parse_block()?;
+        let then_branch = Stmt::Block(then_stmts);
 
-            // Parse all statements inside the block.
-            while let Some(_) = block_parser.current_token() {
-                block_parser.sense()?;
-            }
-            
-            // Retrieve the scopes from the block parser. This is important
-            // if we want to allow variable modifications, but for 'let',
-            // we are just popping the scope anyway.
-            self.scopes = block_parser.scopes;
-            
-            // Pop the 'if' block's scope, discarding its new variables.
-            self.scopes.pop();
-        }
-        if let Some(Token::Else) = self.current_token(){
-                
+        // 3. Parse the Optional "Else" block
+        let else_branch = if let Some(Token::Else) = self.current_token() {
             self.eat(Token::Else)?;
-            let (else_block_tokens, else_end_of_loop_pos) = self.find_loop_block(self.pos)?;
-            self.pos = else_end_of_loop_pos;
             
-            // Execute the 'else' block ONLY if the condition was FALSE
-            if !condition_result {
-                self.scopes.push(HashMap::new());
-                let mut else_block_parser = Parser::new(else_block_tokens);
-                
-                // Pass the current scope state
-                else_block_parser.scopes = self.scopes.clone(); 
-                else_block_parser.functions = self.functions.clone();
+            let else_stmts = self.parse_block()?;
+            Some(Box::new(Stmt::Block(else_stmts)))
+        } else {
+            None
+        };
 
-                while let Some(_) = else_block_parser.current_token() {
-                    else_block_parser.sense()?;
-                }
+        // 4. Consume the final 'end'
+        self.eat(Token::EndOfCondition)?;
 
-                // Sync scopes back (optional depending on your language design)
-                self.scopes = else_block_parser.scopes;
-                self.scopes.pop(); // Pop the scope created implicitly by find_loop_block separation
-            }
-        }
-        Ok(())
+        Ok(Stmt::If {
+            condition,
+            then_branch: Box::new(then_branch),
+            else_branch,
+        })
     }
 
     /// Parses a 'while' loop.
-    fn parse_while(&mut self) -> Result<(), ParseError> {
-        // Consume 'while' keyword.
+    fn parse_while(&mut self) -> Result<Stmt, ParseError> {
         self.eat(Token::While)?;
-        
-        // Save the token position where the condition starts.
-        // We need this to re-evaluate it on each loop.
-        let condition_start_pos = self.pos;
 
-        // --- Find the start of the block ---
-        // We create a temporary parser to parse the condition *without*
-        // executing it, just to find out where it ends.
-        let block_start_pos = {
-            let mut temp_parser = self.clone();
-            temp_parser.parse_condition()?;
-            temp_parser.pos // This is the position *after* the condition.
-        };
-        
-        // --- Find the end of the block and get all tokens inside it ---
-        let (block_tokens, end_of_loop_pos) = self.find_loop_block(block_start_pos)?;
+        // 1. Parse Condition
+        let condition = self.parse_condition()?;
 
+        // 2. Parse Body (Collects statements until 'end')
+        let body_stmts = self.parse_block()?;
+        let body = Stmt::Block(body_stmts);
 
-        // --- Main loop execution ---
-        loop {
-            // **Rewind** the parser to the start of the condition.
-            self.pos = condition_start_pos;
-            
-            // **Re-evaluate** the condition.
-            let condition_result = self.parse_condition()?;
-            
-            if condition_result {
-                // Condition is true, execute the block.
-                
-                // Create a new scope for the loop iteration.
-                self.scopes.push(HashMap::new());
-                
-                // Create a new parser for the block tokens.
-                let mut block_parser = Parser::new(block_tokens.clone());
-                block_parser.scopes = self.scopes.clone(); // Give it current scopes
-                
-                block_parser.functions = self.functions.clone();
+        // 3. Consume 'end'
+        self.eat(Token::EndOfCondition)?;
 
-                // Parse all statements in the block.
-                while let Some(_) = block_parser.current_token() {
-                    block_parser.sense()?;
-                }
-                
-                // Discard the inner-loop-parser's scopes, but keep our own.
-                self.scopes = block_parser.scopes;
-                // Pop the loop iteration's scope.
-                self.scopes.pop();
-                
-                // Go back to the top of the `loop` to re-evaluate.
-                continue;
-            } else {
-                // Condition is false, stop looping.
-                break;
-            }
-        }
-        
-        // The loop is finished. Set the main parser's position
-        // to *after* the 'end' token we found earlier.
-        self.pos = end_of_loop_pos;
-        
-        Ok(())
+        Ok(Stmt::While {
+            condition,
+            body: Box::new(body),
+        })
     }
 
-    fn parse_for(&mut self) -> Result<(), ParseError> {
-
-        // Consume For token
+    fn parse_for(&mut self) -> Result<Stmt, ParseError> {
+        // 1. Consume 'for'
         self.eat(Token::For)?;
         
-        match self.current_token() {
-            Some(Token::TypeInt) => {
-                self.eat(Token::TypeInt)?; 
-            }
-
-            Some(tok) => {
-                // ERROR: 'int' expected after 'for'
-                return Err(ParseError::TypeMismatch { expected: Token::TypeInt, found: tok.clone() });
-            },
-            None => {
-                // ERROR: File ended after 'for'
-                return Err(ParseError::UnexpectedToken { expected: Token::TypeInt, found: None });
-            }
-            
-            _ => {
-                
-            }
+        // 2. Expect 'int' (based on your old grammar rules)
+        if let Some(Token::TypeInt) = self.current_token() {
+            self.eat(Token::TypeInt)?; 
+        } else {
+            return Err(ParseError::UnexpectedToken { 
+                expected: Token::TypeInt, 
+                found: self.current_token().cloned() 
+            });
         }
 
-        let var_name = match self.current_token() {
-            Some(Token::Identifier(name)) => {
-                let name_clone = name.clone();
-                self.pos += 1; // Consume Idenifier
-                name_clone
-            },
-
-            _ => return Err(ParseError::UnexpectedToken { expected: Token::Identifier("identifier".to_string()), found: self.current_token().cloned() })
+        // 3. Get the loop variable name
+        let var_name = if let Some(Token::Identifier(name)) = self.current_token().cloned() {
+            self.pos += 1;
+            name
+        } else {
+            return Err(ParseError::UnexpectedToken { 
+                expected: Token::Identifier("variable".to_string()), 
+                found: self.current_token().cloned() 
+            });
         };
 
+        // 4. Parse the range: " = start .. end"
         self.eat(Token::Assign)?;
-        let start_token = self.parse_expr()?; // CHANGED: Allows variables/math
-        let start_val = match start_token {
-            Token::Integer(n) => n,
-            _ => return Err(ParseError::TypeMismatch { expected: Token::TypeInt, found: start_token })
-        };
+        let start_value = self.parse_expr()?;
 
         self.eat(Token::Range)?;
+        let end_value = self.parse_expr()?;
 
-        let end_token = self.parse_expr()?; // CHANGED: Allows variables/math
-        let end_val = match end_token {
-            Token::Integer(n) => n,
-            _ => return Err(ParseError::TypeMismatch { expected: Token::TypeInt, found: end_token })
-        };
+        // 5. Parse the body
+        // This reuses the 'parse_block' helper we discussed earlier
+        let body_stmts = self.parse_block()?;
 
-        let (block_tokens, end_of_loop_pos) = self.find_loop_block(self.pos)?;
-
-        let mut current_val = start_val;
-
-        while current_val < end_val {
-            self.scopes.push(HashMap::new());
-
-            self.define_variable(var_name.clone(), Token::Integer(current_val));
-
-            let mut block_parser = Parser::new(block_tokens.clone());
-            block_parser.scopes = self.scopes.clone();
-
-            block_parser.functions = self.functions.clone();
-
-            while let Some(_) = block_parser.current_token() {
-                
-                block_parser.sense()?;
-            }
-            
-            self.scopes = block_parser.scopes;
-            self.scopes.pop(); // 'scopes.pop()'
-            
-            current_val += 1;
-        }
-
-        self.pos = end_of_loop_pos;
-
-        Ok(())
+        // 6. Return the Stmt node
+        Ok(Stmt::For {
+            var_name,
+            start_value,
+            end_value,
+            body: Box::new(Stmt::Block(body_stmts)),
+        })
 
     }
     
-    fn parse_fn(&mut self) -> Result<(), ParseError> {
+    fn parse_fn(&mut self) -> Result<Stmt, ParseError> {
+        // 1. Consume 'fn' keyword
         self.eat(Token::Func)?;
 
-        let name = match self.current_token() {
-            Some(Token::Identifier(n)) => n.clone(),
-            _ => return Err(ParseError::UnexpectedToken { expected: Token::Identifier("identifier".to_string()), found: self.current_token().cloned() }),
-        };
-        self.pos += 1;
-
-        self.eat(Token::LParen)?;
-
-        let mut params = Vec::new();
-        while let Some(Token::Identifier(param_name)) = self.current_token() {
-            let p_name = param_name.clone();
+        // 2. Parse Function Name
+        let name = if let Some(Token::Identifier(n)) = self.current_token().cloned() {
             self.pos += 1;
+            n
+        } else {
+            return Err(ParseError::UnexpectedToken {
+                expected: Token::Identifier("function name".to_string()),
+                found: self.current_token().cloned(),
+            });
+        };
 
-            self.eat(Token::Colon)?;
+        // 3. Parse Parameters: (name: type, name: type)
+        self.eat(Token::LParen)?;
+        let mut params = Vec::new();
 
-            let p_type = self.parse_type()?;
+        // Check if the next token is NOT ')', meaning we have params
+        if !self.check(Token::RParen) {
+            loop {
+                // Get Param Name
+                let param_name = if let Some(Token::Identifier(n)) = self.current_token().cloned() {
+                    self.pos += 1;
+                    n
+                } else {
+                    return Err(ParseError::UnexpectedToken {
+                        expected: Token::Identifier("param name".to_string()),
+                        found: self.current_token().cloned(),
+                    });
+                };
 
-            params.push((p_name, p_type));
+                // Get Param Type
+                self.eat(Token::Colon)?;
+                let param_type = self.parse_type()?;
+                
+                params.push((param_name, param_type));
 
-            if let Some(Token::Comma) = self.current_token() {
-                self.pos += 1;
-            }
-            else {
-                break;
+                // If there's a comma, consume it and continue. Otherwise, stop.
+                if let Some(Token::Comma) = self.current_token() {
+                    self.pos += 1;
+                } else {
+                    break;
+                }
             }
         }
-
         self.eat(Token::RParen)?;
 
-        let (body_tokens, end_pos) = self.find_loop_block(self.pos)?;
+        // 4. Parse Body
+        // We reuse the parse_block() helper to recursively parse statements inside the function
+        let body = self.parse_block()?;
 
-        let func = Function { name: name.clone(), params, body: body_tokens };
-        self.functions.insert(name, func);
+        // 5. Consume 'end'
+        self.eat(Token::EndOfCondition)?;
 
-        self.pos = end_pos;
-
-        Ok(())
+        Ok(Stmt::Func {
+            name,
+            params,
+            body,
+        })
     }
 
-    fn parse_return(&mut self) -> Result<(), ParseError>{
+    fn parse_return(&mut self) -> Result<Stmt, ParseError> {
+        let keyword = self.current_token().cloned().unwrap();
         self.eat(Token::Return)?;
-        let value = self.parse_expr()?;
-        return Err(ParseError::Return { value });
+
+        // Check if there is a value to return.
+        // We look ahead to see if the next token starts a new statement or block end.
+        // If it's not a terminator, we assume it's an expression.
+        let value = if !self.check(Token::EndOfCondition) && !self.check(Token::Else) && self.current_token().is_some() {
+            Some(self.parse_expr()?)
+        } else {
+            None
+        };
+
+        Ok(Stmt::Return {
+            keyword,
+            value,
+        })
+    }
+
+    fn check(&self, token: Token) -> bool {
+        if let Some(t) = self.current_token() {
+            *t == token
+        } else {
+            false
+        }
     }
 
     /// Parses an expression (handles addition and subtraction).
     /// This has lower precedence than `parse_term`.
-    fn parse_expr(&mut self) -> Result<Token, ParseError> {
-        // First, parse a 'term' (which handles multiplication/division).
-        let mut result = self.parse_term()?; 
+    fn parse_expr(&mut self) -> Result<Expr, ParseError> {
+        let mut left = self.parse_term()?;
 
-        // Loop as long as we find '+' or '-' tokens.
-        while let Some(tok) = self.current_token() {
+        while let Some(tok) = self.current_token().cloned() {
             match tok {
-                Token::Plus => {
-                    self.eat(Token::Plus)?;
-                    // Parse the next term.
-                    let next_term = self.parse_term()?;
-                    match (&result, &next_term) {
-                        (Token::Integer(lhs), Token::Integer(rhs)) => {
-                            result = Token::Integer(lhs + rhs);
-                        },
-                        (Token::Float(lhs), Token::Float(rhs)) => {
-                            result = Token::Float(lhs + rhs);
-                        },
-                        
-                        (Token::String(lhs), Token::String(rhs)) => {
-                            result = Token::String(format!("{}{}", lhs, rhs));
-                        },
+                Token::Plus | Token::Minus => {
+                    self.pos += 1;
+                    let right = self.parse_term()?;
 
-                        (Token::String(lhs), Token::Integer(rhs)) => {
-                            result = Token::String(format!("{}{}", lhs, rhs));
-                        },
-
-                        (Token::Integer(lhs), Token::String(rhs)) => {
-                            result = Token::String(format!("{}{}", lhs, rhs));
-                        },
-
-                        (Token::String(lhs), Token::Boolean(rhs)) => {
-                            result = Token::String(format!("{}{}", lhs, rhs));
-                        },
-                        
-                        _ => {
-                            return Err(ParseError::TypeMismatch {
-                                expected: Token::TypeInt,
-                                found: next_term,
-                            });
-                        }
-                    }
-                    
-                }
-                Token::Minus => {
-                    self.eat(Token::Minus)?;
-                    // Parse the next term.
-                    let next_term = self.parse_term()?;
-                    // Type-check and perform the operation.
-                    if let (Token::Integer(lhs), Token::Integer(rhs)) = (&result, &next_term) {
-                        result = Token::Integer(lhs - rhs);
-                    } else if let (Token::Float(lhs), Token::Float(rhs)) = (&result, &next_term) {
-                        result = Token::Float(lhs - rhs);
-                        
-                    } else {
-                        // Error: "Cannot subtract {type} from {type}"
-                        return Err(ParseError::TypeMismatch {
-                            expected: Token::TypeInt,
-                            found: next_term,
-                        });
+                    left = Expr::Binary {
+                        left: Box::new(left),
+                        op: tok,
+                        right: Box::new(right),
                     }
                 }
-                // Not a '+' or '-', so the expression is done.
                 _ => break,
             }
         }
         
-        Ok(result)
+        Ok(left)
     }
 
     /// Parses a term (handles multiplication and division).
     /// This has higher precedence than `parse_expr`.
-    fn parse_term(&mut self) -> Result<Token, ParseError> {
-        // First, parse a 'factor' (handles numbers, parens, etc.).
-        let mut result = self.parse_factor()?; 
+    fn parse_term(&mut self) -> Result<Expr, ParseError> {
+        let mut left = self.parse_factor()?;
 
-        // Loop as long as we find '*' or '/' tokens.
-        while let Some(tok) = self.current_token() {
+        while let Some(tok) = self.current_token().cloned() {
             match tok {
-                Token::Multiply => {
-                    self.eat(Token::Multiply)?;
-                    // Parse the next factor.
-                    let next_factor = self.parse_factor()?;
-                    // Type-check and perform the operation.
-                    if let (Token::Integer(lhs), Token::Integer(rhs)) = (&result, &next_factor) {
-                        result = Token::Integer(lhs * rhs);
-                    } else if let (Token::Float(lhs), Token::Float(rhs)) = (&result, &next_factor) {
-                        result = Token::Float(lhs * rhs);
-                    } else {
-                        return Err(ParseError::TypeMismatch {
-                            expected: Token::TypeInt,
-                            found: next_factor,
-                        });
-                    }
+                Token::Multiply | Token::Divide => {
+                    self.pos += 1;
+                    let right = self.parse_factor()?;
+                    left = Expr::Binary {
+                        left: Box::new(left),
+                        op: tok,
+                        right: Box::new(right),
+                    };
                 }
-                Token::Divide => {
-                    self.eat(Token::Divide)?;
-                    // Parse the next factor.
-                    let next_factor = self.parse_factor()?;
-                    // Type-check and perform the operation.
-                    if let (Token::Integer(lhs), Token::Integer(rhs)) = (&result, &next_factor) {
-                        // Note: This will panic if `rhs` is 0.
-                        // A real language should handle this division-by-zero error.
-                        result = Token::Integer(lhs / rhs);
-                    } else if let (Token::Float(lhs), Token::Float(rhs)) = (&result, &next_factor) {
-                        // Note: This will panic if `rhs` is 0.
-                        // A real language should handle this division-by-zero error.
-                        result = Token::Float(lhs / rhs);
-                    } else {
-                        return Err(ParseError::TypeMismatch {
-                            expected: Token::TypeInt,
-                            found: next_factor,
-                        });
-                    }
-                }
-                // Not a '*' or '/', so the term is done.
                 _ => break,
             }
         }
-        Ok(result)
+        Ok(left)
     }
 
     /// Parses a factor (the highest precedence: literals, variables, unary ops, parentheses).
-    fn parse_factor(&mut self) -> Result<Token, ParseError> {
-        let tok = match self.current_token().cloned() {
-            Some(t) => t,
-            None => {
-                // Reached end of input unexpectedly.
-                return Err(ParseError::UnexpectedToken {
-                    expected: Token::Integer(0), // Placeholder
-                    found: None,
-                });
-            }
-        };
+    fn parse_factor(&mut self) -> Result<Expr, ParseError> {
+        let tok = self.current_token().cloned().ok_or(ParseError::UnexpectedToken {
+            expected: Token::Integer(0), found: None,
+        })?;
 
         match tok {
-            // A literal number.
-            Token::Integer(n) => {
-                self.eat(Token::Integer(n))?;
-                Ok(Token::Integer(n))
+            // --- 1. Literals ---
+            Token::Integer(_) | Token::Float(_) | Token::String(_) | Token::Boolean(_) => {
+                self.pos += 1;
+                Ok(Expr::Literal(self.token_to_literal(tok)))
             }
+            
+            // --- 2. Identifiers (Variables, Calls, Lists) ---
+            Token::Identifier(name) => {
+                self.pos += 1; // Consume the identifier name immediately
 
-            Token::Float(f) => {
-                self.eat(Token::Float(f))?;
-                Ok(Token::Float(f))
-            }
-
-            // A literal string.
-            Token::String(s) => {
-                self.eat(Token::String(s.clone()))?;
-                Ok(Token::String(s))
-            }
-            // A literal boolean.
-            Token::Boolean(b) => {
-                self.eat(Token::Boolean(b))?;
-                Ok(Token::Boolean(b))
-            }
-            // Unary plus (e.g., "+5").
-            Token::Plus => {
-                self.eat(Token::Plus)?;
-                self.parse_factor() // Parse the factor that follows.
-            }
-            // Unary minus (e.g., "-5").
-            Token::Minus => {
-                self.eat(Token::Minus)?;
-                let value_token = self.parse_factor()?;
-                // Apply the negation.
-                if let Token::Integer(n) = value_token {
-                    Ok(Token::Integer(-n))
-                } else if let Token::Float(f) = value_token {
-                    Ok(Token::Float(-f))
-                } else {
-                    // Error: "Cannot apply unary minus to {type}"
-                    Err(ParseError::TypeMismatch {
-                        expected: Token::TypeInt,
-                        found: value_token,
-                    })
+                if self.check(Token::LParen) {
+                    // It is a Function Call: run()
+                    self.parse_call_expr(name)
+                } 
+                else if self.check(Token::LBracket) {
+                    // It is a List Access: arr[0]
+                    self.parse_list_index(name)
                 }
-            }
-            // Parentheses (e.g., "(10 + 5)").
+                else if self.check(Token::Dot) {
+                    // It is a Method Call: list.push()
+                    self.parse_method_call(name)
+                }
+                else {
+                    // It is just a Variable: x
+                    Ok(Expr::Variable(name))
+                }
+            },
+
+            // --- 3. Parentheses (Grouping) ---
             Token::LParen => {
-                self.eat(Token::LParen)?; // Consume '('
-                let result = self.parse_expr()?; // Parse the expression inside.
-                self.eat(Token::RParen)?; // Consume ')'
-                Ok(result) // Return the result of the inner expression.
-            }
-            // Brackets (e.g., "[string "hello world", int 20]").
-            Token::LBracket => {    
-                // Consume the opening bracket '['.
-                self.eat(Token::LBracket)?;
+                self.eat(Token::LParen)?;
+                let expr = self.parse_expr()?;
+                self.eat(Token::RParen)?;
+                Ok(Expr::Grouping(Box::new(expr)))
+            },
+
+            Token::LBracket => {
+                self.eat(Token::LBracket)?; // Consume '['
                 
-                // A vector to hold the parsed elements of the list.
-                let mut elements: Vec<Token> = Vec::new(); 
-
-                // Check if the list is empty (i.e., next token is immediately ']').
-                if self.current_token() != Some(&Token::RBracket) {
+                let mut elements = Vec::new();
+                
+                // Check if list is not empty (i.e. next token is NOT ']')
+                if !self.check(Token::RBracket) {
                     loop {
-                        // Parse the expression for the current element (e.g., 10, "text", 5+5).
-                        let element = self.parse_expr()?;
-                        elements.push(element);
+                        // Parse the element (it can be any expression: 1, x, 5+5)
+                        elements.push(self.parse_expr()?);
 
-                        // If there is a comma, consume it and parse the next element.
-                        // Otherwise, we reached the end of the list elements.
-                        if let Some(Token::Comma) = self.current_token() {
+                        // If there is a comma, consume it and continue
+                        if self.check(Token::Comma) {
                             self.eat(Token::Comma)?;
                         } else {
+                            // No comma means end of list elements
                             break;
                         }
                     }
                 }
-
-                // Consume the closing bracket ']'.
-                self.eat(Token::RBracket)?;
                 
-                // Wrap the collected elements in a Token::List and return.
-                Ok(Token::List(elements))
-            }
-            // A variable.
-            Token::Identifier(name) => {
-                if let Some(Token::LParen) = self.peek() {
-                    self.parse_function_call(&name)
-                } else if let Some(Token::LBracket) = self.peek() {
-                    self.parse_list_index(&name)
-                } else if let Some(Token::Dot) = self.peek() {
-                    self.parse_method_call(&name)
-                } else {
-                    
-                    self.eat(Token::Identifier(name.clone()))?;
-                    // Look up the variable's value.
-                    if let Some(value_token) = self.get_variable(&name) {
-                        Ok(value_token.clone()) // Return its value.
-                    } else {
-                        // Error: "Variable not found"
-                        Err(ParseError::UndeclaredVariable { name })
-                    }
-                }
-            }
-            
-            // Any other token is unexpected at this point in an expression.
-            _ => {
-                println!("error here");
-                Err(ParseError::UnexpectedToken {
-                    expected: Token::Integer(0), // Placeholder
-                    found: Some(tok),
+                self.eat(Token::RBracket)?; // Consume ']'
+                
+                // Return the AST node for a List
+                Ok(Expr::List(elements))
+            },
+
+            // --- 4. Unary Minus (-5) ---
+            Token::Minus => {
+                self.eat(Token::Minus)?;
+                let right = self.parse_factor()?;
+                Ok(Expr::Unary {
+                    operator: Token::Minus,
+                    right: Box::new(right),
                 })
-            }
+            },
+            
+            _ => Err(ParseError::UnexpectedToken { expected: Token::Unknown, found: Some(tok) })
         }
-       
     }
 
-    fn parse_function_call(&mut self, name: &str) -> Result<Token, ParseError> {
-        // 1. Consume the function name and the opening parenthesis '('.
-        self.eat(Token::Identifier(name.to_string()))?;
+    fn parse_call_expr(&mut self, name: String) -> Result<Expr, ParseError> {
+        // We already consumed the identifier in parse_factor, now consume '('
         self.eat(Token::LParen)?;
         
-        // Vector to hold the evaluated arguments passed to the function.
-        let mut args: Vec<Token> = Vec::new();
-
-        // 2. Parse arguments if the parenthesis is not immediately closed.
+        let mut arguments = Vec::new();
         if self.current_token() != Some(&Token::RParen) {
             loop {
-                // Evaluate the expression for the current argument.
-                let arg_value = self.parse_expr()?;
-                args.push(arg_value);
-
-                // If there is a comma, consume it and continue; otherwise, break.
+                arguments.push(self.parse_expr()?); // These now return Expr
                 if let Some(Token::Comma) = self.current_token() {
-                    self.eat(Token::Comma)?;
+                    self.pos += 1;
                 } else {
                     break;
                 }
             }
         }
-
-        // 3. Consume the closing parenthesis ')'.
+        
         self.eat(Token::RParen)?;
 
-        if let Some(result) = crate::native_functions::dispatch(name, args.clone()) {
-            return result;
-        }
-
-        // 4. Retrieve the function definition from the registry.
-        // If not found, return an UndeclaredVariable error.
-        let func = match self.functions.get(name) {
-            Some(f) => f.clone(),
-            None => return Err(ParseError::UndeclaredVariable { name: name.to_string() }),
-        };
-
-        // 5. Prepare the local scope for the function execution.
-        let mut func_scope = HashMap::new();
-
-        // Check argument count first
-        if func.params.len() != args.len() {
-            return Err(ParseError::UnkownType { 
-                type_name: format!("Function '{}' expects {} arguments, but got {}", name, func.params.len(), args.len()) 
-            });
-        }
-
-        // Map the passed arguments to the function's parameter names.
-        // 'param' is now a tuple: (name, expected_type)
-        for ((param_name, expected_type), arg_value) in func.params.iter().zip(args.into_iter()) {
-            
-            // Check if the argument matches the expected type
-            if !self.check_type_compatibility(expected_type, &arg_value) {
-                return Err(ParseError::TypeMismatch { 
-                    expected: expected_type.clone(), 
-                    found: arg_value 
-                });
-            }
-
-            // Insert into scope if type is correct
-            func_scope.insert(param_name.clone(), arg_value);
-        }
-
-        // 6. Create a temporary Parser instance to execute the function body.
-        // This ensures complete isolation and proper execution flow.
-        let mut func_parser = Parser::new(func.body);
-
-        // Inject scopes: 
-        // We pass the Global Scope (index 0) so the function can access global variables,
-        // and the Local Scope we just created for parameters.
-        if let Some(global_scope) = self.scopes.first() {
-            func_parser.scopes = vec![global_scope.clone(), func_scope];
-        } else {
-            func_parser.scopes = vec![func_scope];
-        }
-
-        // Pass the function registry to the new parser.
-        // This enables the function to call other functions or itself (recursion).
-        func_parser.functions = self.functions.clone();
-
-        // Default return value is void (represented as boolean true).
-        let mut return_val = Token::Boolean(true);
-
-        // 7. Execute the function body tokens.
-        while func_parser.current_token().is_some() {
-            match func_parser.sense() {
-                Ok(_) => { /* Continue execution normally */ }
-                
-                // Capture the 'Return' signal.
-                // We treat Return as a special error type to break the execution loop immediately.
-                Err(ParseError::Return { value }) => {
-                    return_val = value;
-                    break;
-                }
-                
-                // Propagate any other actual parsing errors.
-                Err(e) => return Err(e),
-            }
-        }
-
-        // Return the final value of the function execution.
-        Ok(return_val)
+        // Return the Call variant from your ast::Expr
+        Ok(Expr::Call {
+            callee: Box::new(Expr::Variable(name)),
+            paren: Token::RParen, // Stored for error reporting later
+            arguments,
+        })
     }
 
-    fn parse_method_call(&mut self, var_name: &str) -> Result<Token, ParseError> {
-        self.eat(Token::Identifier(var_name.to_string()))?;
+    fn parse_logic_or(&mut self) -> Result<Expr, ParseError> {
+        let mut left = self.parse_logic_and()?;
 
+        while let Some(tok) = self.current_token().cloned() {
+            if tok == Token::Or {
+                self.pos += 1;
+                // 'right' must also be an Expr
+                let right = self.parse_logic_and()?;
+                
+                left = Expr::Logical {
+                    left: Box::new(left),
+                    operator: tok,
+                    right: Box::new(right),
+                };
+            } else {
+                break;
+            }
+        }
+        Ok(left)
+    }
+
+    fn parse_logic_and(&mut self) -> Result<Expr, ParseError> {
+        let mut left = self.parse_comparison()?;
+
+        while let Some(tok) = self.current_token().cloned() {
+            if tok == Token::And {
+                self.pos += 1;
+                let right = self.parse_comparison()?;
+                left = Expr::Logical {
+                    left: Box::new(left),
+                    operator: tok,
+                    right: Box::new(right),
+                };
+            } else {
+                break;
+            }
+        }
+        Ok(left)
+    }
+
+
+
+    fn parse_comparison(&mut self) -> Result<Expr, ParseError> {
+        // 1. Get the left side (Math level: 5 + 5)
+        let mut left = self.parse_expr()?; 
+
+        // 2. Check for comparison operators
+        if let Some(tok) = self.current_token().cloned() {
+            match tok {
+                Token::Equals | Token::NotEquals | Token::Greater | 
+                Token::Lesser | Token::GreaterEquals | Token::LesserEquals => {
+                    self.pos += 1;
+                    // 3. Get the right side
+                    let right = self.parse_expr()?;
+                    
+                    // 4. Return the Binary Node (NOT the result)
+                    return Ok(Expr::Binary {
+                        left: Box::new(left),
+                        op: tok,
+                        right: Box::new(right),
+                    });
+                }
+                _ => {}
+            }
+        }
+        // If no operator, just return the math expression (e.g., "if (x)")
+        Ok(left)
+    }
+
+    fn parse_method_call(&mut self, var_name: String) -> Result<Expr, ParseError> {
+        // 1. Consume the dot '.'
         self.eat(Token::Dot)?;
-        let method_name = match self.current_token() {
-            Some(Token::Identifier(name)) => name.clone(),
-            _ => return Err(ParseError::UnexpectedToken { 
+
+        // 2. Get the method name (e.g., "push", "len")
+        let method_name = if let Some(Token::Identifier(name)) = self.current_token().cloned() {
+            self.pos += 1;
+            name
+        } else {
+            return Err(ParseError::UnexpectedToken { 
                 expected: Token::Identifier("method name".to_string()), 
                 found: self.current_token().cloned() 
-            })
+            });
         };
-        self.pos += 1;
 
+        // 3. Consume '('
         self.eat(Token::LParen)?;
-        // Vector to hold the evaluated arguments passed to the function.
-        let mut args: Vec<Token> = Vec::new();
 
-        // 2. Parse arguments if the parenthesis is not immediately closed.
-        if self.current_token() != Some(&Token::RParen) {
+        // 4. Parse arguments: (arg1, arg2)
+        let mut args: Vec<Expr> = Vec::new();
+
+        // Check if the next token is NOT ')', meaning we have params
+        if !self.check(Token::RParen) {
             loop {
-                // Evaluate the expression for the current argument.
-                let arg_value = self.parse_expr()?;
-                args.push(arg_value);
+                // Recursively parse the argument as an expression
+                args.push(self.parse_expr()?);
 
-                // If there is a comma, consume it and continue; otherwise, break.
                 if let Some(Token::Comma) = self.current_token() {
                     self.eat(Token::Comma)?;
                 } else {
@@ -1297,102 +841,105 @@ impl Parser {
             }
         }
 
-        // 3. Consume the closing parenthesis ')'.
+        // 5. Consume ')'
         self.eat(Token::RParen)?;
-        
-        for scopes in self.scopes.iter_mut().rev() {
-            if let Some(variable) = scopes.get_mut(var_name) {
-                match variable {
-                    Token::List(elements) => {
-                        if method_name == "push" {
-                            if args.is_empty() {
-                                return Err(ParseError::UnkownType { type_name: "push() requires an argument".to_string() });
-                            }
-                            elements.push(args[0].clone());
-                            return Ok(Token::Boolean(true)); 
-                        } 
-                        else if method_name == "pop" {
-                            return Ok(elements.pop().unwrap_or(Token::Boolean(false)));
-                        }
-                        else if method_name == "len" {
-                            return Ok(Token::Integer(elements.len() as i64));
-                        }
-                    },
 
-                    Token::String(s) => {
-                        if method_name == "len" {
-                            return Ok(Token::Integer(s.len() as i64));
-                        }
-                        else if method_name == "uppercase" {
-                            return Ok(Token::String(s.to_uppercase()));
-                        }
-                    },
-
-                    _ => {}
-                }
-
-                return Err(ParseError::UnkownType { 
-                    type_name: format!("Method '{}' not found on this type", method_name) 
-                });
-            }
-        }
-
-        Err(ParseError::UndeclaredVariable { name: var_name.to_string() })
+        // 6. Return the AST Node
+        // We wrap the object name (var_name) in an Expr::Variable so the Interpreter
+        // knows to look it up later.
+        Ok(Expr::MethodCall {
+            object: Box::new(Expr::Variable(var_name)),
+            method: method_name,
+            args,
+        })
     }
 
     /// The main dispatch function. It "senses" what the current token is
     /// and dispatches to the correct parsing function for that statement.
-    pub fn sense(&mut self) -> Result<(), ParseError> {
-        if let Some(tok) = self.current_token() {
-                match tok {
-                    // Statement starts with 'let'.
-                    Token::Let => self.parse_let(),
-                    // Statement starts with 'print'.
-                    Token::Print => self.parse_print(),
-                    // Statement starts with 'if'.
-                    Token::If => self.parse_if(),
-                    // Statement starts with 'while'.
-                    Token::While => self.parse_while(),
-                    Token::For => self.parse_for(),
-                    Token::Func => self.parse_fn(),
-                    Token::Return => self.parse_return(),
-                    // Statement starts with an identifier.
-                    Token::Identifier(name) => {
-                        let name_clone = name.clone();
-                        // We must "peek" to see what comes next.
-                        if let Some(Token::Assign) = self.peek() {
-                            // If it's 'Identifier' followed by '=', it's an assignment.
-                            self.parse_assigment()?; // Typo: parse_assignment
-                            Ok(())
-                        } 
-                        else if let Some(Token::LParen) = self.peek() {
-                            self.parse_function_call(&name_clone)?;
-                            Ok(())
-                        } 
-                        else if let Some(Token::LBracket) = self.peek() {
-                            self.parse_list_assignment(&name_clone)?;
-                            Ok(())
-                        } 
-                        else if let Some(Token::Dot) = self.peek() {
-                            self.parse_method_call(&name_clone)?;
-                            Ok(())
-                        } 
-                        else {
-                            // An identifier by itself is not a valid statement.
-                            Err(ParseError::UnkownType { type_name: format!("Unexpected token after identifier: {:?}", self.peek()) })
-                        }
+    pub fn parse_statement(&mut self) -> Result<Stmt, ParseError> {
+        if self.current_token().is_none() {
+            return Err(ParseError::UnexpectedToken { 
+                expected: Token::Unknown, found: None 
+            });
+        }
+
+        let token = self.current_token().unwrap().clone();
+
+        match token {
+            Token::Let => self.parse_let(),
+            Token::Print => self.parse_print(),
+            Token::If => self.parse_if(),
+            Token::While => self.parse_while(),
+            Token::For => self.parse_for(),
+            Token::Func => self.parse_fn(),
+            Token::Return => self.parse_return(),
+            
+            // --- The Tricky Part: Identifiers ---
+            Token::Identifier(name) => {
+                // We consume the identifier here because we need to see what comes AFTER it.
+                self.pos += 1; 
+
+                // Case A: Variable Assignment (x = 10)
+                if self.check(Token::Assign) {
+                    self.eat(Token::Assign)?;
+                    let value = self.parse_expr()?;
+                    Ok(Stmt::Expression(Expr::Assign {
+                        name,
+                        value: Box::new(value),
+                    }))
+                }
+                // Case B: List Assignment (arr[0] = 10) OR List Access (arr[0])
+                else if self.check(Token::LBracket) {
+                    // We parse the indices: [0][1]
+                    let mut indices = Vec::new();
+                    while self.check(Token::LBracket) {
+                        self.eat(Token::LBracket)?;
+                        indices.push(self.parse_expr()?);
+                        self.eat(Token::RBracket)?;
                     }
-                    // Any other token is an unknown/invalid start to a statement.
-                    _ => {
-                        let name = format!("{:?}", tok);
-                        self.output.push("unknown".to_string());
-                        Err(ParseError::UnkownType { type_name: name })
+
+                    // Check if an '=' follows the brackets
+                    if self.check(Token::Assign) {
+                        // It is a List Assignment: arr[0] = 5
+                        self.eat(Token::Assign)?;
+                        let value = self.parse_expr()?;
+                        Ok(Stmt::ListAssign { list_name: name, indices, value })
+                    } else {
+                        // It was just a List Access expression: arr[0]
+                        // We reconstruct the expression tree
+                        let mut expr = Expr::Variable(name);
+                        for idx in indices {
+                            expr = Expr::Index { 
+                                list: Box::new(expr), 
+                                index: Box::new(idx) 
+                            };
+                        }
+                        Ok(Stmt::Expression(expr))
                     }
                 }
-        } else {
-            // No more tokens, end of file. This is successful.
-            Ok(())
+                // Case C: Method Call (list.push())
+                else if self.check(Token::Dot) {
+                    // We call the helper we wrote earlier
+                    // Note: we pass 'name' because we already consumed the identifier
+                    let expr = self.parse_method_call(name)?;
+                    Ok(Stmt::Expression(expr))
+                }
+                // Case D: Function Call (run())
+                else if self.check(Token::LParen) {
+                    let expr = self.parse_call_expr(name)?;
+                    Ok(Stmt::Expression(expr))
+                }
+                // Case E: Just a standalone variable (x)
+                else {
+                    Ok(Stmt::Expression(Expr::Variable(name)))
+                }
+            },
+            
+            _ => Err(ParseError::UnexpectedToken {
+                expected: Token::Unknown,
+                found: Some(token),
+            }),
         }
     }
-    
+        
 }

@@ -100,7 +100,7 @@ fn run() {
     let mut parser = parser::Parser::new(tokens);
 
     while parser.current_token().is_some() {
-        if let Err(e) = parser.sense() {
+        if let Err(e) = parser.parse_statement() {
             eprintln!("❌ Parser Error: {:?}", e);
             break;
         }

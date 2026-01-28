@@ -11,7 +11,7 @@ use parser::Parser;
 use lexer::lexer;
 use tokens::Token;
 
-use crate::parser::Function;
+use crate::{ast::Stmt, parser::Function};
 
 pub struct WolfEngine {
     globals: HashMap<String, Token>,
@@ -46,33 +46,60 @@ impl WolfEngine {
         self.globals.insert(name.to_string(), Token::List(value));
     }
 
+    // pub fn run(&mut self, content: &str) -> Result<(), String> {
+    //     let tokens = match lexer(content) {
+    //         Ok(t) => t,
+    //         Err(e) => return Err(format!("Lexer Error: {}", e)),
+    //     };
+
+    //     let mut parser = Parser::new(tokens);
+
+    //     if let Some(scope) = parser.scopes.first_mut() {
+    //         for (k, v) in &self.globals {
+    //             scope.insert(k.clone(), v.clone());
+    //         }
+    //     }
+
+    //     // Parser çalıştırılır
+    //     while parser.current_token().is_some() {
+    //         if let Err(e) = parser.parse_statement() {
+    //             return Err(format!("Parser Error: {:?}", e));
+    //         }
+    //     }
+
+    //     if let Some(final_scope) = parser.scopes.first() {
+    //         self.globals = final_scope.clone();
+    //     }
+
+        
+        
+    //     Ok(())
+    // }
+
     pub fn run(&mut self, content: &str) -> Result<(), String> {
+        // 1. Run Lexer
         let tokens = match lexer(content) {
             Ok(t) => t,
             Err(e) => return Err(format!("Lexer Error: {}", e)),
         };
 
+        // 2. Initialize Parser
         let mut parser = Parser::new(tokens);
+        let mut ast_tree: Vec<Stmt> = Vec::new();
 
-        if let Some(scope) = parser.scopes.first_mut() {
-            for (k, v) in &self.globals {
-                scope.insert(k.clone(), v.clone());
+        // 3. Loop and build the AST
+        // We keep calling parse_statement() until we hit EOF
+        while parser.current_token().is_some() && *parser.current_token().unwrap() != Token::EOF {
+            match parser.parse_statement() {
+                Ok(stmt) => ast_tree.push(stmt),
+                Err(e) => return Err(format!("Parser Error: {:?}", e)),
             }
         }
 
-        // Parser çalıştırılır
-        while parser.current_token().is_some() {
-            if let Err(e) = parser.sense() {
-                return Err(format!("Parser Error: {:?}", e));
-            }
-        }
+        // 4. PRINT THE AST (This is your test!)
+        // The {:#?} formatter checks if your Enum structures are correct
+        println!("AST DEBUG OUTPUT:\n{:#?}", ast_tree); 
 
-        if let Some(final_scope) = parser.scopes.first() {
-            self.globals = final_scope.clone();
-        }
-
-        
-        
         Ok(())
     }
 

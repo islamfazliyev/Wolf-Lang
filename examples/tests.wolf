@@ -1,9 +1,11 @@
-let x : int = 10
-let y : int = 15
+fn add(a: int, b: int)
+    return a + b
+end
 
-if x < y and y > x
-    print "aaa"
-end
-else 
-    print "bbb"
-end
+let x: int = 10
+let y: int = 20
+
+let numbers: list<int> = [1, 2]
+numbers.push(x)
+
+print add(x, y)

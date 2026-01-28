@@ -50,16 +50,16 @@ pub enum Expr {
         index: Box<Expr>,
     },
 
-    ListAssign {
-        list_name: String,
-        index: Box<Expr>, 
-        value: Box<Expr>
+    MethodCall {
+        object: Box<Expr>,
+        method: String,
+        args: Vec<Expr>,
     }
 
 }
 
 
-
+#[derive(Debug, Clone)]
 pub enum Stmt {
 
     Expression(Expr),
@@ -94,6 +94,11 @@ pub enum Stmt {
     Return {
         keyword: Token,
         value: Option<Expr>,
-    }
+    },
+    ListAssign {
+        list_name: String,
+        indices: Vec<Expr>, 
+        value: Expr 
+    },
 
 }
