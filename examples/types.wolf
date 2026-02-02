@@ -3,7 +3,6 @@ let number2: float = 1.1
 let text: string = "hello world"
 let condition: bool = true
 
-
 print number
 print number2
 print text

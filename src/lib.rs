@@ -5,13 +5,14 @@ pub mod error_handler;
 pub mod stdlib;
 pub mod native_functions;
 pub mod ast;
+pub mod interpreter;
 
 use std::collections::HashMap;
 use parser::Parser;
 use lexer::lexer;
 use tokens::Token;
 
-use crate::{ast::Stmt, parser::Function};
+use crate::{ast::Stmt, interpreter::Function};
 
 pub struct WolfEngine {
     globals: HashMap<String, Token>,

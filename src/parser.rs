@@ -3,21 +3,13 @@ use std::{collections::HashMap, convert::identity, ptr::null, thread::Scope, vec
 use crate::{ast::Stmt, ast::LiteralValue, ast::Expr, error_handler::ParseError, tokens::{self, Token}};
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Function {
-    pub name: String,
-    pub params: Vec<(String, Token)>,
-    pub body: Vec<Token>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
 pub struct Parser {
     tokens: Vec<Token>,
     pos: usize,
     output: Vec<String>,
     // A stack of HashMaps to manage variable scopes.
     // The last HashMap in the Vec is the innermost (current) scope.
-    pub scopes: Vec<HashMap<String, Token>>,
-    pub functions: HashMap<String, Function>,
+    
 }
 
 impl Parser {
@@ -27,8 +19,7 @@ impl Parser {
             pos: 0,
             output: Vec::new(),
             // Initialize with one, global scope.
-            scopes: vec![HashMap::new()],
-            functions: HashMap::new(),
+            
         }
     }
 
@@ -80,54 +71,6 @@ impl Parser {
                 found: None,
             })
         }
-    }
-
-    /// Defines a new variable in the **current** (innermost) scope.
-    fn define_variable(&mut self, name: String, value: Token) {
-        // .last_mut() gets the innermost scope.
-        // .unwrap() is safe because we initialize the scopes vec with one scope in `new()`.
-        self.scopes.last_mut().unwrap().insert(name, value);
-    }
-
-    /// Assigns a new value to an **existing** variable.
-    /// It searches for the variable from the innermost scope outwards to respect variable shadowing.
-    /// If found, it performs a type check before updating the value. Returns an error
-    /// if the variable is not declared or if the types mismatch.
-    fn assign_variable(&mut self, name: &str, value: Token) -> Result<(), ParseError> {
-        // .iter_mut().rev() iterates from the last scope (innermost) to the first (global).
-        for scope in self.scopes.iter_mut().rev() {
-            if let Some(existing_val) = scope.get_mut(name) {
-                // Found the variable.
-                let existing_val = scope.get_mut(name).unwrap();
-                
-                // Check if the *type* (enum variant) of the new value matches the old one.
-                if std::mem::discriminant(existing_val) == std::mem::discriminant(&value) {
-                    
-                    // Types match, update the value.
-                    *existing_val = value;
-                    return Ok(());
-                } else {
-                    // Type mismatch.
-                    return Err(ParseError::TypeMismatch { expected: existing_val.clone(), found: value });
-                }
-            }
-        }
-        // If we looped through all scopes and didn't find it, it's undeclared.
-        Err(ParseError::UndeclaredVariable { name: name.to_string() })
-    }
-
-    /// Retrieves a reference to a variable's value token from the scopes.
-    /// It searches for the variable from the innermost scope outwards, returning the first one it finds.
-    fn get_variable(&self, name: &str) -> Option<&Token> {
-        // .iter().rev() iterates from the innermost scope outwards.
-        for scope in self.scopes.iter().rev() {
-            if let Some(value) = scope.get(name) {
-                // Return the first match we find (respecting shadowing).
-                return Some(value);
-            }
-        }
-        // Not found in any scope.
-        None
     }
     
     /// Parses a variable declaration statement like 'let int x = 10'.
@@ -198,36 +141,6 @@ impl Parser {
             });
         }
         
-    }
-
-    fn check_type_compatibility(&mut self, expected: &Token, value: &Token) -> bool {
-        match (expected, value) {
-            
-            (Token::TypeInt, Token::Integer(_)) => true,
-            (Token::TypeString, Token::String(_)) => true,
-            (Token::TypeBool, Token::Boolean(_)) => true,
-            (Token::TypeFloat, Token::Float(_)) => true,
-
-            
-            (Token::TypeList(inner_rule), Token::List(elements)) => {
-                
-                if elements.is_empty() {
-                    return true;
-                }
-
-                for element in elements {
-            
-                    if !self.check_type_compatibility(inner_rule, element) {
-                        return false;
-                    }
-                }
-
-                true
-            },
-
-            
-            _ => false,
-        }
     }
 
     // Note: Typo in function name, should be "parse_assignment"
@@ -314,67 +227,9 @@ impl Parser {
 
         Ok(Stmt::Print(value))
     }
-
-    /// Helper function for `parse_print` to handle the actual printing.
-    fn print_token_value(&self, token: &Token) -> Result<(), ParseError> {
-        match token {
-            // Print literal values directly.
-            Token::String(s) => print!("{:?} ", s),
-            Token::Integer(n) => print!("{:?} ", n),
-            Token::Float(f) => print!("{:?} ", f),
-            Token::Boolean(b) => print!("{:?} ", b),
-            Token::List(elements) => {
-                for (i, element) in elements.iter().enumerate() {
-                    self.print_token_value(element)?;
-                }
-            },
-            // If it's an identifier, we need to look up its value.
-            Token::Identifier(name) => {
-                if let Some(value_token) = self.get_variable(name) {
-                    self.print_token_value(value_token)?;
-                } else {
-                    return Err(ParseError::UndeclaredVariable { name: name.clone() });
-                }
-            }
-            // Error if trying to print something non-printable (like a keyword).
-            _ => return Err(ParseError::UnexpectedToken {
-                expected: Token::String("a printable value".to_string()),
-                found: Some(token.clone()),
-            })
-        }
-        Ok(())
-    }
-
     /// Parses a condition (e.g., 'x > 10', 'name == "iso"').
     fn parse_condition(&mut self) -> Result<Expr, ParseError> {
         self.parse_logic_or()
-    }
-    fn find_loop_block(&self, start_pos: usize) -> Result<(Vec<Token>, usize), ParseError> {
-        let mut temp_pos = start_pos;
-        let mut scope_depth = 1;
-
-        while let Some(tok) = self.tokens.get(temp_pos) {
-            if *tok == Token::While || *tok == Token::If || *tok == Token::For || *tok == Token::Else { 
-                scope_depth += 1;
-            } else if *tok == Token::EndOfCondition { // 'end' token'ı
-                scope_depth -= 1;
-                if scope_depth == 0 {
-                    break; 
-                }
-            }
-            temp_pos += 1;
-        }
-
-        if scope_depth != 0 {
-            return Err(ParseError::UnexpectedToken {
-                expected: Token::EndOfCondition,
-                found: None,
-            });
-        }
-        
-        let tokens: Vec<Token> = self.tokens[start_pos..temp_pos].to_vec();
-        let end_pos = temp_pos + 1; // 'end' token'ından sonrası
-        Ok((tokens, end_pos))
     }
 
     fn parse_block(&mut self) -> Result<Vec<Stmt>, ParseError> {
