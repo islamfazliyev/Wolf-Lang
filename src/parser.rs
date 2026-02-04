@@ -632,8 +632,6 @@ impl Parser {
         Ok(left)
     }
 
-
-
     fn parse_comparison(&mut self) -> Result<Expr, ParseError> {
         // 1. Get the left side (Math level: 5 + 5)
         let mut left = self.parse_expr()?; 

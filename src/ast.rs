@@ -1,6 +1,6 @@
 use crate::tokens::Token;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum LiteralValue {
     Int(i64),
     Float(f64),
@@ -10,7 +10,7 @@ pub enum LiteralValue {
 }
 
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     Binary {            
         left: Box<Expr>,
@@ -59,7 +59,7 @@ pub enum Expr {
 }
 
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Stmt {
 
     Expression(Expr),
@@ -100,5 +100,4 @@ pub enum Stmt {
         indices: Vec<Expr>, 
         value: Expr 
     },
-
 }

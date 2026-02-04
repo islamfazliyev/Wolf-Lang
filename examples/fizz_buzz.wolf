@@ -4,16 +4,12 @@ while counter <= 100
     counter = counter + 1
     if counter - (counter / 3) * 3 == 0 and counter - (counter / 5) * 5 == 0
         print "FizzBuzz"
-
-    end
     else
         if counter - (counter / 3) * 3 == 0
             print "Fizz"
-        end
         else 
             if counter - (counter / 5) * 5 == 0
                 print "Buzz"
-            end
             else
                 print counter
             end

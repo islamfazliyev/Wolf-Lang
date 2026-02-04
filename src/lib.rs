@@ -12,11 +12,12 @@ use parser::Parser;
 use lexer::lexer;
 use tokens::Token;
 
-use crate::{ast::Stmt, interpreter::Function};
+use crate::{ast::Stmt, interpreter::{Function, Interpreter}};
 
 pub struct WolfEngine {
     globals: HashMap<String, Token>,
     functions: HashMap<String, Function>,
+    interpreter: Interpreter
 }
 
 impl WolfEngine {
@@ -24,28 +25,41 @@ impl WolfEngine {
         WolfEngine {
             globals: HashMap::new(),
             functions: HashMap::new(),
+            interpreter: Interpreter::new()
         }
     }
 
     pub fn push_int(&mut self, name: &str, value: i64) {
-        self.globals.insert(name.to_string(), Token::Integer(value));
+        if let Some(scope) = self.interpreter.scopes.first_mut() {
+            scope.insert(name.to_string(), Token::Integer(value));
+        }
     }
 
     pub fn push_float(&mut self, name: &str, value: f64) {
-        self.globals.insert(name.to_string(), Token::Float(value));
+        if let Some(scope) = self.interpreter.scopes.first_mut() {
+            scope.insert(name.to_string(), Token::Float(value));
+        }
     }
 
     pub fn push_str(&mut self, name: &str, value: &str) {
-        self.globals.insert(name.to_string(), Token::String(value.to_string()));
+        if let Some(scope) = self.interpreter.scopes.first_mut() {
+            scope.insert(name.to_string(), Token::String(value.to_string()));
+        }
     }
 
     pub fn push_bool(&mut self, name: &str, value: bool) {
-        self.globals.insert(name.to_string(), Token::Boolean(value));
+        if let Some(scope) = self.interpreter.scopes.first_mut() {
+            scope.insert(name.to_string(), Token::Boolean(value));
+        }
     }
 
     pub fn push_list(&mut self, name: &str, value: Vec<Token>) {
-        self.globals.insert(name.to_string(), Token::List(value));
+        if let Some(scope) = self.interpreter.scopes.first_mut() {
+            scope.insert(name.to_string(), Token::List(value));
+        }
     }
+
+    
 
     // pub fn run(&mut self, content: &str) -> Result<(), String> {
     //     let tokens = match lexer(content) {
@@ -96,51 +110,56 @@ impl WolfEngine {
                 Err(e) => return Err(format!("Parser Error: {:?}", e)),
             }
         }
-
+        self.interpreter.interpret(ast_tree).map_err(|e| format!("Interpreter error: {:?}", e))?;
         // 4. PRINT THE AST (This is your test!)
         // The {:#?} formatter checks if your Enum structures are correct
-        println!("AST DEBUG OUTPUT:\n{:#?}", ast_tree); 
 
         Ok(())
     }
 
     pub fn get_int(&self, name: &str) -> Option<i64> {
-        if let Some(Token::Integer(n)) = self.globals.get(name) {
-            Some(*n)
-        } else {
-            None
+        // Look in the first scope
+        if let Some(scope) = self.interpreter.scopes.first() {
+            if let Some(Token::Integer(n)) = scope.get(name) {
+                return Some(*n);
+            }
         }
+        None
     }
 
     pub fn get_float(&self, name: &str) -> Option<f64> {
-        if let Some(Token::Float(n)) = self.globals.get(name) {
-            Some(*n)
-        } else {
-            None
+        if let Some(scope) = self.interpreter.scopes.first() {
+            if let Some(Token::Float(n)) = scope.get(name) {
+                return Some(*n);
+            }
         }
+        None
     }
 
     pub fn get_str(&self, name: &str) -> Option<String> {
-        if let Some(Token::String(s)) = self.globals.get(name) {
-            Some(s.clone())
-        } else {
-            None
+        if let Some(scope) = self.interpreter.scopes.first() {
+            if let Some(Token::String(n)) = scope.get(name) {
+                return Some(n.to_string());
+            }
         }
+        None
     }
     pub fn get_bool(&self, name: &str) -> Option<bool> {
-        if let Some(Token::Boolean(b)) = self.globals.get(name) {
-            Some(*b)
-        } else {
-            None
+        if let Some(scope) = self.interpreter.scopes.first() {
+            if let Some(Token::Boolean(n)) = scope.get(name) {
+                return Some(*n);
+            }
         }
+        None
     }
 
     pub fn get_list(&self, name: &str) -> Option<Vec<Token>> {
-        if let Some(Token::List(l)) = self.globals.get(name) {
-            Some(l.clone())
-        } else {
-            None
+        if let Some(scope) = self.interpreter.scopes.first() {
+            if let Some(Token::List(n)) = scope.get(name) {
+                return Some(n.clone());
+            }
         }
+        None
     }
     
 }
