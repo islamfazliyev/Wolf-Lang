@@ -79,6 +79,21 @@ impl Interpreter {
                 self.get_variable(&name).cloned().unwrap_or(Token::Unknown)
             }
 
+            Expr::Binary { left, op, right } => {
+                let left = self.evaluate(*left);
+                let right = self.evaluate(*right);
+
+                match (left, op, right) {
+                    (Token::Integer(l), Token::Plus, Token::Integer(r)) => Token::Integer(l + r),
+                    (Token::Float(l), Token::Plus, Token::Float(r)) => Token::Float(l + r),
+                    (Token::Integer(l), Token::Minus, Token::Integer(r)) => Token::Integer(l - r),
+                    (Token::Float(l), Token::Minus, Token::Float(r)) => Token::Float(l - r),
+                    (Token::String(l), Token::Plus, Token::String(r)) => Token::String(format!("{}{}", l, r)),
+                    
+                    _ => panic!("Runtime Error: Type mismatch"),
+                }
+            }
+
             _ => Token::Unknown,
         }
     }
