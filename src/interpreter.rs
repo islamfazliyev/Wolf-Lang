@@ -1,5 +1,5 @@
 use core::panic;
-use std::collections::HashMap;
+use std::{collections::HashMap, io::IsTerminal};
 use crate::{ast::{Stmt, Expr, LiteralValue}, tokens::Token, error_handler::ParseError};
 
 
@@ -66,6 +66,56 @@ impl Interpreter {
                 }
             }
 
+            Stmt::Block(statements) => {
+                self.scopes.push(HashMap::new());
+
+                for stmt in statements {
+                    if let Err(e) = self.execute(stmt) {
+                        self.scopes.pop(); // Hata olsa bile çıkarken temizle!
+                        return Err(e);
+                    }
+                }
+                self.scopes.pop();
+                Ok(())
+            }
+
+            Stmt::If { condition, then_branch, else_branch } => {
+                let evaluated_cond = self.evaluate(condition);
+
+                let is_true = match evaluated_cond {
+                    Token::Boolean(b) => b,
+                    _ => panic!("Runtime Error: 'if' koşulu boolean olmalı! Bulunan: {:?}", evaluated_cond),
+                };
+
+                if is_true {
+                    self.execute(*then_branch)?;
+                } else if let Some(else_stmt) = else_branch {
+                    self.execute(*else_stmt)?;
+                }
+                
+                Ok(())
+            }
+
+            Stmt::While { condition, body } => {
+
+                loop {
+                    
+                    let evaluated_cond = self.evaluate(condition.clone());
+                    let is_true = match evaluated_cond {
+                        Token::Boolean(b) => b,
+                        _ => panic!("Runtime Error: 'while' koşulu boolean olmalı! Bulunan: {:?}", evaluated_cond),
+                    };
+    
+                    if is_true {
+                        self.execute(*body.clone())?;
+                    } else {
+                        break;
+                    }
+
+                }
+                Ok(())
+            }
+
             _ => Ok(())
         }
     }
@@ -88,11 +138,30 @@ impl Interpreter {
                 let left = self.evaluate(*left);
                 let right = self.evaluate(*right);
 
+                if op == Token::Equals {
+                    return Token::Boolean(left == right);
+                }
+                if op == Token::NotEquals {
+                    return Token::Boolean(left != right);
+                }
+
+                if let (Some(l_num), Some(r_num)) = (to_float(&left), to_float(&right)) {
+                    match op {
+                        Token::Greater => return Token::Boolean(l_num > r_num),
+                        Token::Lesser => return Token::Boolean(l_num < r_num),
+                        Token::GreaterEquals => return Token::Boolean(l_num >= r_num),
+                        Token::LesserEquals => return Token::Boolean(l_num <= r_num),
+
+                        _ => {} 
+                    }
+                }
+
                 match (left, op, right) {
                     (Token::Integer(l), Token::Plus, Token::Integer(r)) => Token::Integer(l + r),
                     (Token::Float(l), Token::Plus, Token::Float(r)) => Token::Float(l + r),
                     (Token::Integer(l), Token::Minus, Token::Integer(r)) => Token::Integer(l - r),
                     (Token::Float(l), Token::Minus, Token::Float(r)) => Token::Float(l - r),
+                    
                     (Token::String(l), Token::Plus, Token::String(r)) => Token::String(format!("{}{}", l, r)),
                     
                     _ => panic!("Runtime Error: Type mismatch"),
@@ -198,4 +267,12 @@ impl Interpreter {
         }        
     }
 
+}
+
+fn to_float(token: &Token) -> Option<f64> {
+    match token {
+        Token::Integer(n) => Some(*n as f64),
+        Token::Float(f) => Some(*f),
+        _ => None,
+    }
 }

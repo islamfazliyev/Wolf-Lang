@@ -242,17 +242,22 @@ impl Parser {
     fn parse_block(&mut self) -> Result<Vec<Stmt>, ParseError> {
         let mut statements = Vec::new();
         
-        while let Some(tok) = self.current_token().cloned() {
-            match tok {
-                Token::EndOfCondition | Token::Else => break,
-                Token::EOF => break,
-
-                _ => {
-                    statements.push(self.parse_statement()?);
-                }
+        while let Some(tok) = self.current_token() {
+            if *tok == Token::EndOfCondition || *tok == Token::EOF {
+                break;
             }
+            statements.push(self.parse_statement()?);
         }
-        Ok(statements)
+        if let Some(Token::EndOfCondition) = self.current_token() {
+            self.eat(Token::EndOfCondition)?; // 'end'i yok et
+            Ok(statements)
+        } else {
+            
+            return Err(ParseError::UnexpectedToken {
+                expected: Token::EndOfCondition,
+                found: self.current_token().cloned(),
+            })
+        }
     }
 
     /// Parses an 'if' statement and its block.
@@ -277,9 +282,6 @@ impl Parser {
             None
         };
 
-        // 4. Consume the final 'end'
-        self.eat(Token::EndOfCondition)?;
-
         Ok(Stmt::If {
             condition,
             then_branch: Box::new(then_branch),
@@ -298,8 +300,7 @@ impl Parser {
         let body_stmts = self.parse_block()?;
         let body = Stmt::Block(body_stmts);
 
-        // 3. Consume 'end'
-        self.eat(Token::EndOfCondition)?;
+        
 
         Ok(Stmt::While {
             condition,
@@ -566,6 +567,18 @@ impl Parser {
                 Ok(Expr::Unary {
                     operator: Token::Minus,
                     right: Box::new(right),
+                })
+            },
+
+            Token::Bang => {
+                
+                self.eat(Token::Bang)?;
+                                
+                let right_expr = self.parse_factor()?;
+
+                Ok(Expr::Unary { 
+                    operator: Token::Bang, 
+                    right: Box::new(right_expr) 
                 })
             },
             
