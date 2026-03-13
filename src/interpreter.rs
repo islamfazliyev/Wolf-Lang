@@ -291,6 +291,10 @@ impl Interpreter {
                     (Token::Float(l), Token::Plus, Token::Float(r)) => Token::Float(l + r),
                     (Token::Integer(l), Token::Minus, Token::Integer(r)) => Token::Integer(l - r),
                     (Token::Float(l), Token::Minus, Token::Float(r)) => Token::Float(l - r),
+                    (Token::Integer(l), Token::Multiply, Token::Integer(r)) => Token::Integer(l * r),
+                    (Token::Float(l), Token::Multiply, Token::Float(r)) => Token::Float(l * r),
+                    (Token::Integer(l), Token::Divide, Token::Integer(r)) => Token::Integer(l / r),
+                    (Token::Float(l), Token::Divide, Token::Float(r)) => Token::Float(l / r),
                     
                     (Token::String(l), Token::Plus, Token::String(r)) => Token::String(format!("{}{}", l, r)),
                     
