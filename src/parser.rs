@@ -73,6 +73,17 @@ impl Parser {
         }
     }
     
+
+    pub fn parse_import(&mut self) -> Result<Stmt, ParseError> {
+        self.eat(Token::Import)?;
+        let dir = if let Some(Token::String(name)) = self.current_token().cloned() {
+            self.pos += 1;
+            name
+        } else {
+            return  Err(ParseError::UnexpectedToken { expected: Token::TypeString, found: self.current_token().cloned() });
+        };
+        Ok(Stmt::Import { directory: dir })
+    }
     /// Parses a variable declaration statement like 'let int x = 10'.
     /// A 'let' statement must follow the structure: let <type> <identifier> = <value>
     pub fn parse_let(&mut self) -> Result<Stmt, ParseError> {
@@ -736,6 +747,7 @@ impl Parser {
         let token = self.current_token().unwrap().clone();
 
         match token {
+            Token::Import => self.parse_import(),
             Token::Let => self.parse_let(),
             Token::Print => self.parse_print(),
             Token::If => self.parse_if(),

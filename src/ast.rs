@@ -100,4 +100,8 @@ pub enum Stmt {
         indices: Vec<Expr>, 
         value: Expr 
     },
+
+    Import {
+        directory: String
+    },
 }

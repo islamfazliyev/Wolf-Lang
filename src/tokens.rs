@@ -54,6 +54,8 @@ pub enum Token {
     //Functions
     Func,
 
+    Import,
+
     // other
     EndOfCondition,
     Range,

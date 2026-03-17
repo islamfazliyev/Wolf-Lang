@@ -1,7 +1,8 @@
 use core::panic;
 use std::{collections::HashMap, io::IsTerminal};
-use crate::{NativeFn, ast::{Expr, LiteralValue, Stmt}, error_handler::ParseError, tokens::{self, Token}};
+use crate::{NativeFn, ast::{Expr, LiteralValue, Stmt}, error_handler::ParseError, lexer, parser::Parser, tokens::{self, Token}};
 use std::rc::Rc;
+use std::fs;
 use std::cell::RefCell;
 
 
@@ -243,6 +244,31 @@ impl Interpreter {
                 };
 
                 Err(ParseError::Return { value: return_val })
+            }
+
+            Stmt::Import { directory } => {
+                let import_directory = fs::read_to_string(directory).unwrap();
+
+                let tokens = match lexer::lexer(&import_directory) {
+                    Ok(t) => t,
+                    Err(e) => panic!("aaa"),
+                };
+
+                // 2. Initialize Parser
+                let mut parser = Parser::new(tokens);
+                let mut ast_tree: Vec<Stmt> = Vec::new();
+
+                // 3. Loop and build the AST
+                // We keep calling parse_statement() until we hit EOF
+                while parser.current_token().is_some() && *parser.current_token().unwrap() != Token::EOF {
+                    match parser.parse_statement() {
+                        Ok(stmt) => ast_tree.push(stmt),
+                        Err(e) => panic!("aaa"),
+                    }
+                }
+                self.interpret(ast_tree);
+                
+                Ok(())
             }
 
             _ => Ok(())

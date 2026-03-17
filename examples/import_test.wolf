@@ -1,0 +1,5 @@
+import "examples/math.wolf"
+
+let add : int = add(1, 3)
+
+print add
