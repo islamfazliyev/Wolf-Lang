@@ -1,9 +1,16 @@
-import "examples/import_test.wolf"
+import "examples/math.wolf" as math
 
-let add : int = add(1,2)
+let numbers: list<int> = [1, 2, 3]
+numbers.push(math.add(10, 20))
 
-print add
+let length: int = numbers.len()
+print length
+print numbers
 
-fn close(a: int, b: int)
-    return a - b
-end
+
+let mylist: list<int> = [1, 2, 3]
+
+
+let popped: int = mylist.pop()
+print popped
+print mylist

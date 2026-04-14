@@ -35,7 +35,7 @@ impl WolfEngine {
     }
 
     pub fn register_module(&mut self, module_name: &str) {
-        self.interpreter.loaded_modules.insert(module_name.to_string());
+        self.interpreter.loaded_modules.insert(module_name.to_string(), module_name.to_string());
     }
     
     pub fn push_int(&mut self, name: &str, value: i64) {

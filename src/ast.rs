@@ -102,6 +102,7 @@ pub enum Stmt {
     },
 
     Import {
-        directory: String
+        directory: String,
+        identifier: String
     },
 }

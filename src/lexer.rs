@@ -44,6 +44,7 @@ pub fn lexer(content: &str) -> Result<Vec<Token>, String> {
                 "range" => token.push(Token::Range),
                 "return" => token.push(Token::Return),
                 "import" => token.push(Token::Import),
+                "as" => token.push(Token::As),
                 //other
                 "end" => token.push(Token::EndOfCondition),
                 _ => token.push(Token::Identifier(slice)),

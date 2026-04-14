@@ -1,5 +1,5 @@
 use core::panic;
-use std::{collections::{HashMap, HashSet}, io::IsTerminal};
+use std::{collections::{HashMap}};
 use crate::{NativeFn, ast::{Expr, LiteralValue, Stmt}, error_handler::ParseError, lexer, parser::Parser, tokens::{self, Token}};
 use std::rc::Rc;
 use std::fs;
@@ -18,7 +18,8 @@ pub struct Interpreter {
     pub scopes: Vec<HashMap<String, Token>>,
     pub functions: Rc<RefCell<HashMap<String, Function>>>,
     pub native_fns: Rc<RefCell<HashMap<String, NativeFn>>>,
-    pub loaded_modules: HashSet<String>,
+    pub loaded_modules: HashMap<String, String>,
+    pub namespaces: HashMap<String, HashMap<String, Function>>,
 }
 
 impl std::fmt::Debug for Interpreter {
@@ -44,7 +45,8 @@ impl Interpreter {
             scopes: vec![HashMap::new()],
             functions: Rc::new(RefCell::new(HashMap::new())),
             native_fns: Rc::new(RefCell::new(HashMap::new())),
-            loaded_modules: HashSet::new(),
+            loaded_modules: HashMap::new(),
+            namespaces: HashMap::new(),
         }
     }
     pub fn interpret(&mut self, statements: Vec<Stmt>) -> Result<(), ParseError> {
@@ -262,17 +264,23 @@ impl Interpreter {
                 Err(ParseError::Return { value: return_val })
             }
 
-            Stmt::Import { directory } => {
-                if self.loaded_modules.contains(&directory) {
-                    return Ok(())
+            Stmt::Import { directory, identifier } => {
+                if self.loaded_modules.contains_key(&directory) {
+                    return Ok(());
                 }
-                self.loaded_modules.insert(directory.clone());
+                if self.loaded_modules.contains_key(&identifier) {
+                    panic!("Runtime error: you can't assign same name in imports");
+                }
+                self.loaded_modules.insert(directory.clone(), identifier.clone());
 
-                let import_directory = fs::read_to_string(directory).unwrap();
+                let import_directory = match fs::read_to_string(&directory) {
+                    Ok(c) => c,
+                    Err(e) => panic!("Runtime Error: could not read file '{}': {}", directory, e),
+                };
 
                 let tokens = match lexer::lexer(&import_directory) {
                     Ok(t) => t,
-                    Err(e) => panic!("aaa"),
+                    Err(e) => panic!("Runtime Error: lexer failed in '{}': {}", directory, e),
                 };
 
                 let mut parser = Parser::new(tokens);
@@ -281,11 +289,16 @@ impl Interpreter {
                 while parser.current_token().is_some() && *parser.current_token().unwrap() != Token::EOF {
                     match parser.parse_statement() {
                         Ok(stmt) => ast_tree.push(stmt),
-                        Err(e) => panic!("aaa"),
+                        Err(e) => panic!("Runtime Error: parser failed in '{}': {:?}", directory, e),
                     }
                 }
-                self.interpret(ast_tree);
-                
+
+                let mut sub = Interpreter::new();
+                sub.interpret(ast_tree)?;
+
+                let module_fns = sub.functions.borrow().clone();
+                self.namespaces.insert(identifier, module_fns);
+
                 Ok(())
             }
 
@@ -503,6 +516,105 @@ impl Interpreter {
                 }
                 self.scopes.pop();
                 return_value
+            }
+
+            Expr::MethodCall { object, method, args } => {
+                let obj_name = match *object {
+                    Expr::Variable(ref name) => name.clone(),
+                    _ => panic!("Runtime Error: invalid method call target"),
+                };
+
+                // --- Namespace call: math.add(1, 2) ---
+                if let Some(module_fns) = self.namespaces.get(&obj_name).cloned() {
+                    let func = match module_fns.get(&method) {
+                        Some(f) => f.clone(),
+                        None => panic!("Runtime Error: module '{}' has no function '{}'", obj_name, method),
+                    };
+
+                    let evaluated_args: Vec<Token> = args.into_iter()
+                        .map(|a| self.evaluate(a))
+                        .collect();
+
+                    if func.params.len() != evaluated_args.len() {
+                        panic!(
+                            "Runtime Error: '{}' expects {} args but got {}",
+                            method, func.params.len(), evaluated_args.len()
+                        );
+                    }
+
+                    let mut call_scope = HashMap::new();
+                    for ((param_name, _param_type), arg_val) in func.params.iter().zip(evaluated_args) {
+                        call_scope.insert(param_name.clone(), arg_val);
+                    }
+                    self.scopes.push(call_scope);
+
+                    let mut return_value = Token::Unknown;
+                    for stmt in func.body {
+                        match self.execute(stmt) {
+                            Ok(_) => {}
+                            Err(ParseError::Return { value }) => {
+                                return_value = value;
+                                break;
+                            }
+                            Err(e) => {
+                                self.scopes.pop();
+                                return Token::Unknown;
+                            }
+                        }
+                    }
+                    self.scopes.pop();
+                    return return_value;
+                }
+
+                // --- List method call: mylist.push(x), mylist.pop(), mylist.len() ---
+                let evaluated_args: Vec<Token> = args.into_iter()
+                    .map(|a| self.evaluate(a))
+                    .collect();
+
+                // Find the list in scopes
+                let list = self.scopes.iter()
+                    .rev()
+                    .find_map(|scope| scope.get(&obj_name).cloned());
+
+                match list {
+                    Some(Token::List(mut elements)) => {
+                        match method.as_str() {
+                            "push" => {
+                                let val = evaluated_args.into_iter().next()
+                                    .unwrap_or(Token::Unknown);
+                                elements.push(val);
+                                // Write back
+                                for scope in self.scopes.iter_mut().rev() {
+                                    if scope.contains_key(&obj_name) {
+                                        scope.insert(obj_name, Token::List(elements));
+                                        break;
+                                    }
+                                }
+                                Token::Unknown
+                            }
+                            "pop" => {
+                                let popped = elements.pop().unwrap_or(Token::Unknown);
+                                // Write back
+                                for scope in self.scopes.iter_mut().rev() {
+                                    if scope.contains_key(&obj_name) {
+                                        scope.insert(obj_name, Token::List(elements));
+                                        break;
+                                    }
+                                }
+                                popped
+                            }
+                            "len" => {
+                                Token::Integer(elements.len() as i64)
+                            }
+                            _ => panic!("Runtime Error: unknown list method '{}'", method),
+                        }
+                    }
+                    Some(other) => panic!(
+                        "Runtime Error: '{}' is not a list, cannot call method '{}'",
+                        obj_name, method
+                    ),
+                    None => panic!("Runtime Error: undefined variable '{}'", obj_name),
+                }
             }
 
             _ => Token::Unknown,

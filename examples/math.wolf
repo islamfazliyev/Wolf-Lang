@@ -1,5 +1,16 @@
-fn add(a: int, b: int)
-    return a + b
+fn add(x: int, y: int)
+    return x + y
 end
 
-print "text"
+fn multiply(x: int, y: int)
+    return x * y
+end
+
+fn max(a: int, b: int)
+    if a > b
+        return a
+    end
+    else
+        return b
+    end
+end

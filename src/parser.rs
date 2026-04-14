@@ -82,7 +82,19 @@ impl Parser {
         } else {
             return  Err(ParseError::UnexpectedToken { expected: Token::TypeString, found: self.current_token().cloned() });
         };
-        Ok(Stmt::Import { directory: dir })
+
+        self.eat(Token::As)?;
+        
+        let iden = if let Some(Token::Identifier(name)) = self.current_token().cloned() {
+            self.pos += 1;
+            name
+        } else {
+            return Err(ParseError::UnexpectedToken {
+                expected: Token::Identifier("module alias".to_string()),
+                found: self.current_token().cloned(),
+            });
+        };
+        Ok(Stmt::Import { directory: dir, identifier: iden})
     }
     /// Parses a variable declaration statement like 'let int x = 10'.
     /// A 'let' statement must follow the structure: let <type> <identifier> = <value>
