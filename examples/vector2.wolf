@@ -1,0 +1,14 @@
+struct Vector2
+    x: int
+    y: int
+end
+
+impl Vector2
+    fn get_x()
+        return self.x
+    end
+
+    fn get_y()
+        return self.y
+    end
+end

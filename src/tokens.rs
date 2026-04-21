@@ -56,6 +56,16 @@ pub enum Token {
 
     Import,
 
+
+    //struct-impl
+    Struct,
+    Impl,
+
+    StructInstance {
+        type_name: String,
+        fields: Vec<(String, Token)>,
+    },
+    
     // other
     EndOfCondition,
     Range,

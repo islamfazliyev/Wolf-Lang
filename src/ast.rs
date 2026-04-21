@@ -54,6 +54,11 @@ pub enum Expr {
         object: Box<Expr>,
         method: String,
         args: Vec<Expr>,
+    },
+
+    FieldGet {
+        object: Box<Expr>,
+        field: String,
     }
 
 }
@@ -91,6 +96,17 @@ pub enum Stmt {
         params: Vec<(String, Token)>,
         body: Vec<Stmt>,
     },
+
+    Struct {
+        name: String,
+        body: Vec<Stmt>
+    },
+
+    Impl {
+        name: String,
+        body: Vec<Stmt>
+    },
+
     Return {
         keyword: Token,
         value: Option<Expr>,

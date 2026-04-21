@@ -149,6 +149,11 @@ impl Parser {
 
                 },
 
+                Token::Identifier(name) => {
+                    self.pos += 1;
+                    Ok(Token::Identifier(name))
+                }
+
                 _ => {
                     // throw error
                     Err(ParseError::UnexpectedToken {
@@ -437,6 +442,68 @@ impl Parser {
         })
     }
 
+    fn parse_struct(&mut self) -> Result<Stmt, ParseError> {
+        self.eat(Token::Struct)?;
+
+        let name = if let Some(Token::Identifier(n)) = self.current_token().cloned() {
+            self.pos += 1;
+            n
+        } else {
+            return Err(ParseError::UnexpectedToken {
+                expected: Token::Identifier("struct name".to_string()),
+                found: self.current_token().cloned(),
+            });
+        };
+
+        let mut fields = Vec::new();
+        while !self.check(Token::EndOfCondition) {
+            let field_name = if let Some(Token::Identifier(n)) = self.current_token().cloned() {
+                self.pos += 1;
+                n
+            } else {
+                return Err(ParseError::UnexpectedToken {
+                    expected: Token::Identifier("struct name".to_string()),
+                    found: self.current_token().cloned(),
+                });
+            };
+
+            self.eat(Token::Colon)?;
+            let field_type = self.parse_type()?;
+            fields.push(Stmt::Let { name: field_name, data_type: field_type, value: Expr::Literal(LiteralValue::Nil) });
+        }
+
+        self.eat(Token::EndOfCondition)?;
+        Ok(Stmt::Struct { name, body: fields })
+    }
+
+    fn parse_impl(&mut self) -> Result<Stmt, ParseError> {
+        self.eat(Token::Impl)?;
+
+        let name = if let Some(Token::Identifier(n)) = self.current_token().cloned() {
+            self.pos += 1;
+            n
+        } else {
+            return Err(ParseError::UnexpectedToken {
+                expected: Token::Identifier("impl name".to_string()),
+                found: self.current_token().cloned(),
+            });
+        };
+
+        let mut methods = Vec::new();
+        while !self.check(Token::EndOfCondition) {
+            if self.check(Token::Func) {
+                methods.push(self.parse_fn()?);
+            } else {
+                return Err(ParseError::UnexpectedToken {
+                    expected: Token::Func,
+                    found: self.current_token().cloned(),
+                });
+            }
+        }
+        self.eat(Token::EndOfCondition)?;
+        Ok(Stmt::Impl { name, body: methods })
+    }
+
     fn parse_return(&mut self) -> Result<Stmt, ParseError> {
         let keyword = self.current_token().cloned().unwrap();
         self.eat(Token::Return)?;
@@ -714,6 +781,13 @@ impl Parser {
             });
         };
 
+        if !self.check(Token::LParen) {
+            return Ok(Expr::FieldGet {
+                object: Box::new(Expr::Variable(var_name)),
+                field: method_name,
+            });
+        }
+
         // 3. Consume '('
         self.eat(Token::LParen)?;
 
@@ -766,6 +840,8 @@ impl Parser {
             Token::While => self.parse_while(),
             Token::For => self.parse_for(),
             Token::Func => self.parse_fn(),
+            Token::Struct => self.parse_struct(),
+            Token::Impl => self.parse_impl(),
             Token::Return => self.parse_return(),
             
             // --- The Tricky Part: Identifiers ---

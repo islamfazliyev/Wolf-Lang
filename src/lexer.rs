@@ -41,6 +41,8 @@ pub fn lexer(content: &str) -> Result<Vec<Token>, String> {
                 "and" => token.push(Token::And),
                 "or" => token.push(Token::Or),
                 "fn" => token.push(Token::Func),
+                "struct" => token.push(Token::Struct),
+                "impl" => token.push(Token::Impl),
                 "range" => token.push(Token::Range),
                 "return" => token.push(Token::Return),
                 "import" => token.push(Token::Import),

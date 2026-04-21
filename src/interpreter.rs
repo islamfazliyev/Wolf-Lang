@@ -18,6 +18,8 @@ pub struct Interpreter {
     pub scopes: Vec<HashMap<String, Token>>,
     pub functions: Rc<RefCell<HashMap<String, Function>>>,
     pub native_fns: Rc<RefCell<HashMap<String, NativeFn>>>,
+    pub struct_defs: HashMap<String, Vec<(String, Token)>>,
+    pub impl_defs: HashMap<String, HashMap<String, Function>>,
     pub loaded_modules: HashMap<String, String>,
     pub namespaces: HashMap<String, HashMap<String, Function>>,
 }
@@ -45,6 +47,8 @@ impl Interpreter {
             scopes: vec![HashMap::new()],
             functions: Rc::new(RefCell::new(HashMap::new())),
             native_fns: Rc::new(RefCell::new(HashMap::new())),
+            struct_defs: HashMap::new(),
+            impl_defs: HashMap::new(),
             loaded_modules: HashMap::new(),
             namespaces: HashMap::new(),
         }
@@ -173,7 +177,7 @@ impl Interpreter {
 
                 for stmt in statements {
                     if let Err(e) = self.execute(stmt) {
-                        self.scopes.pop(); // Hata olsa bile çıkarken temizle!
+                        self.scopes.pop();
                         return Err(e);
                     }
                 }
@@ -199,9 +203,7 @@ impl Interpreter {
             }
 
             Stmt::While { condition, body } => {
-
                 loop {
-                    
                     let evaluated_cond = self.evaluate(condition.clone());
                     let is_true = match evaluated_cond {
                         Token::Boolean(b) => b,
@@ -213,7 +215,6 @@ impl Interpreter {
                     } else {
                         break;
                     }
-
                 }
                 Ok(())
             }
@@ -235,7 +236,6 @@ impl Interpreter {
                 
                 self.scopes.push(HashMap::new());
 
-
                 while current < limit {
                     if let Some(scope) = self.scopes.last_mut() {
                         scope.insert(var_name.clone(), Token::Integer(current));
@@ -252,6 +252,30 @@ impl Interpreter {
             Stmt::Func { name, params, body } => {
                 let func = Function {name: name.clone(), params, body};
                 self.functions.borrow_mut().insert(name, func);
+                Ok(())
+            }
+
+            Stmt::Struct { name, body } => {
+                let fields = body.iter().map(|stmt| {
+                    if let Stmt::Let { name, data_type, .. } = stmt {
+                        (name.clone(), Token::Unknown)
+                    } else {
+                        panic!("Struct body must only contain field declarations!");
+                    }
+                }).collect();
+                self.struct_defs.insert(name, fields);
+                Ok(())
+            }
+
+            Stmt::Impl { name, body } => {
+                for stmt in body {
+                    if let Stmt::Func { name: fn_name, params, body } = stmt {
+                        self.impl_defs
+                            .entry(name.clone())
+                            .or_default()
+                            .insert(fn_name, Function { params, body, name: name.clone() });
+                    }
+                }
                 Ok(())
             }
 
@@ -297,7 +321,14 @@ impl Interpreter {
                 sub.interpret(ast_tree)?;
 
                 let module_fns = sub.functions.borrow().clone();
-                self.namespaces.insert(identifier, module_fns);
+                self.namespaces.insert(identifier.clone(), module_fns);
+
+                for (name, fields) in sub.struct_defs {
+                    self.struct_defs.insert(name, fields);
+                }
+                for (name, methods) in sub.impl_defs {
+                    self.impl_defs.insert(name, methods);
+                }
 
                 Ok(())
             }
@@ -322,7 +353,6 @@ impl Interpreter {
 
             Expr::Binary { left, op, right } => {
                 let left = self.evaluate(*left);
-
                 let right = self.evaluate(*right);
 
                 if op == Token::Equals {
@@ -338,7 +368,6 @@ impl Interpreter {
                         Token::Lesser => return Token::Boolean(l_num < r_num),
                         Token::GreaterEquals => return Token::Boolean(l_num >= r_num),
                         Token::LesserEquals => return Token::Boolean(l_num <= r_num),
-
                         _ => {} 
                     }
                 }
@@ -352,9 +381,7 @@ impl Interpreter {
                     (Token::Float(l), Token::Multiply, Token::Float(r)) => Token::Float(l * r),
                     (Token::Integer(l), Token::Divide, Token::Integer(r)) => Token::Integer(l / r),
                     (Token::Float(l), Token::Divide, Token::Float(r)) => Token::Float(l / r),
-                    
                     (Token::String(l), Token::Plus, Token::String(r)) => Token::String(format!("{}{}", l, r)),
-                    
                     _ => panic!("Runtime Error: Type mismatch"),
                 }
             }
@@ -364,11 +391,8 @@ impl Interpreter {
                 match (operator, right_val) {
                     (Token::Minus, Token::Integer(n)) => Token::Integer(-n),
                     (Token::Minus, Token::Float(n)) => Token::Float(-n),
-
                     (Token::Bang, Token::Boolean(b)) => Token::Boolean(!b),
-
                     (op, val) => panic!("Runtime Error: {:?} operator cannot used with {:?} .", op, val),
-                    
                 }
             }
 
@@ -389,9 +413,7 @@ impl Interpreter {
                         if !b { 
                             return Token::Boolean(false);
                         }
-                        
                     } else {
-                     
                         panic!("Runtime Error: 'and' operator's left needs to be Boolean!");
                     }
                 }
@@ -401,9 +423,7 @@ impl Interpreter {
                     return Token::Boolean(b);
                 } else {
                     panic!("Runtime Error: 'and'/'or' operator's right needs to be Boolean!");
-
                 }
-
             }
 
             Expr::Assign { name, value } => {
@@ -411,11 +431,8 @@ impl Interpreter {
 
                 for scope in self.scopes.iter_mut().rev() {
                     if let Some(old_value) = scope.get_mut(&name) {
-                        
                         if Self::check_type_compatibility(old_value, &new_value) {
-                            
                             *old_value = new_value.clone();
-                            
                             return new_value;
                         } else {
                             panic!("Runtime Error: Type mismatch! Variable '{}' is {:?} but you tried to assign {:?}", name, old_value, new_value);
@@ -424,12 +441,10 @@ impl Interpreter {
                 }
 
                 panic!("Runtime Error: Variable '{}' not declared.", name);
-                
             }
 
             Expr::Index { list, index } => {
                 let list_val = self.evaluate(*list);
-    
                 let index_val = self.evaluate(*index);
     
                 if let (Token::List(elements), Token::Integer(idx)) = (list_val, index_val) {
@@ -437,7 +452,6 @@ impl Interpreter {
                         panic!("Runtime Error: Index cannot be negative! Found: {}", idx);
                     }
                     let i = idx as usize;
-        
                     if i < elements.len() {
                         return elements[i].clone();
                     } else {
@@ -446,19 +460,15 @@ impl Interpreter {
                 } else {
                     panic!("Runtime Error: Type mismatch. Expected List and Integer index.");
                 } 
-    
             }
 
             Expr::List(elements) => {
                 let mut evaluated_list = Vec::new();
-
                 for expr in elements {
                     let value = self.evaluate(expr);
                     evaluated_list.push(value);
                 }
-
                 Token::List(evaluated_list)
-                
             }
 
             Expr::Call { callee, paren, arguments } => {
@@ -468,9 +478,17 @@ impl Interpreter {
                 };
 
                 let evaluated_args: Vec<Token> = arguments
-                .into_iter()
-                .map(|arg| self.evaluate(arg))
-                .collect();
+                    .into_iter()
+                    .map(|arg| self.evaluate(arg))
+                    .collect();
+
+                // --- Struct constructor: Point(10, 20) ---
+                if let Some(fields) = self.struct_defs.get(&name).cloned() {
+                    let instance_fields = fields.iter().zip(evaluated_args)
+                        .map(|((field_name, _), val)| (field_name.clone(), val))
+                        .collect();
+                    return Token::StructInstance { type_name: name, fields: instance_fields };
+                }
                 
                 if let Some(result) = crate::native_functions::dispatch(&name, evaluated_args.clone()) {
                     return result.unwrap_or(Token::Unknown);
@@ -481,7 +499,6 @@ impl Interpreter {
                 }
 
                 let func = self.functions.borrow().get(&name).cloned();
-
                 let func = match func {
                     Some(f) => f,
                     None => panic!("Runtime Error: Undefined function '{}'", name),
@@ -508,9 +525,9 @@ impl Interpreter {
                             return_value = value;
                             break;
                         }
-                        Err(e) => {
+                        Err(_) => {
                             self.scopes.pop();
-                            return Token::Unknown; // or panic
+                            return Token::Unknown;
                         }
                     }
                 }
@@ -556,7 +573,59 @@ impl Interpreter {
                                 return_value = value;
                                 break;
                             }
-                            Err(e) => {
+                            Err(_) => {
+                                self.scopes.pop();
+                                return Token::Unknown;
+                            }
+                        }
+                    }
+                    self.scopes.pop();
+                    return return_value;
+                }
+
+                // --- Struct method call: p.get_x() ---
+                let instance = self.scopes.iter()
+                    .rev()
+                    .find_map(|scope| scope.get(&obj_name).cloned());
+
+                if let Some(Token::StructInstance { ref type_name, .. }) = instance {
+                    let func = self.impl_defs
+                        .get(type_name)
+                        .and_then(|methods| methods.get(&method))
+                        .cloned()
+                        .unwrap_or_else(|| panic!(
+                            "Runtime Error: struct '{}' has no method '{}'",
+                            type_name, method
+                        ));
+
+                    let evaluated_args: Vec<Token> = args.into_iter()
+                        .map(|a| self.evaluate(a))
+                        .collect();
+
+                    if func.params.len() != evaluated_args.len() {
+                        panic!(
+                            "Runtime Error: '{}' expects {} args but got {}",
+                            method, func.params.len(), evaluated_args.len()
+                        );
+                    }
+
+                    // Inject `self` + args into the call scope
+                    let mut call_scope = HashMap::new();
+                    call_scope.insert("self".to_string(), instance.unwrap());
+                    for ((param_name, _), arg_val) in func.params.iter().zip(evaluated_args) {
+                        call_scope.insert(param_name.clone(), arg_val);
+                    }
+                    self.scopes.push(call_scope);
+
+                    let mut return_value = Token::Unknown;
+                    for stmt in func.body {
+                        match self.execute(stmt) {
+                            Ok(_) => {}
+                            Err(ParseError::Return { value }) => {
+                                return_value = value;
+                                break;
+                            }
+                            Err(_) => {
                                 self.scopes.pop();
                                 return Token::Unknown;
                             }
@@ -571,7 +640,6 @@ impl Interpreter {
                     .map(|a| self.evaluate(a))
                     .collect();
 
-                // Find the list in scopes
                 let list = self.scopes.iter()
                     .rev()
                     .find_map(|scope| scope.get(&obj_name).cloned());
@@ -583,7 +651,6 @@ impl Interpreter {
                                 let val = evaluated_args.into_iter().next()
                                     .unwrap_or(Token::Unknown);
                                 elements.push(val);
-                                // Write back
                                 for scope in self.scopes.iter_mut().rev() {
                                     if scope.contains_key(&obj_name) {
                                         scope.insert(obj_name, Token::List(elements));
@@ -594,7 +661,6 @@ impl Interpreter {
                             }
                             "pop" => {
                                 let popped = elements.pop().unwrap_or(Token::Unknown);
-                                // Write back
                                 for scope in self.scopes.iter_mut().rev() {
                                     if scope.contains_key(&obj_name) {
                                         scope.insert(obj_name, Token::List(elements));
@@ -609,7 +675,7 @@ impl Interpreter {
                             _ => panic!("Runtime Error: unknown list method '{}'", method),
                         }
                     }
-                    Some(other) => panic!(
+                    Some(_) => panic!(
                         "Runtime Error: '{}' is not a list, cannot call method '{}'",
                         obj_name, method
                     ),
@@ -617,13 +683,23 @@ impl Interpreter {
                 }
             }
 
+            Expr::FieldGet { object, field } => {
+                let obj = self.evaluate(*object);
+                if let Token::StructInstance { fields, .. } = obj {
+                    fields.into_iter()
+                        .find(|(name, _)| name == &field)
+                        .map(|(_, val)| val)
+                        .unwrap_or(Token::Unknown)
+                } else {
+                    panic!("Runtime Error: field access on non-struct value")
+                }
+            }
+
             _ => Token::Unknown,
         }
-
     }
 
     fn get_variable(&self, name: &str) -> Option<&Token> {
-        
         for scope in self.scopes.iter().rev() {
             if let Some(val) = scope.get(name) {
                 return Some(val);
@@ -634,7 +710,6 @@ impl Interpreter {
 
     fn print_token_value(&self, token: &Token) -> Result<(), ParseError> {
         match token {
-            // Print literal values directly.
             Token::String(s) => print!("{} ", s),
             Token::Integer(n) => print!("{} ", n),
             Token::Float(f) => print!("{} ", f),
@@ -642,13 +717,11 @@ impl Interpreter {
             Token::List(elements) => {
                 for (i, element) in elements.iter().enumerate() {
                     self.print_token_value(element)?;
-
                     if i < elements.len() - 1 {
                         print!(", ");
                     }
                 }
             },
-            // If it's an identifier, we need to look up its value.
             Token::Identifier(name) => {
                 if let Some(value_token) = self.get_variable(name) {
                     self.print_token_value(value_token)?;
@@ -656,7 +729,15 @@ impl Interpreter {
                     return Err(ParseError::UndeclaredVariable { name: name.clone() });
                 }
             }
-            // Error if trying to print something non-printable (like a keyword).
+            Token::StructInstance { type_name, fields } => {
+                print!("{} {{ ", type_name);
+                for (i, (field_name, field_val)) in fields.iter().enumerate() {
+                    print!("{}: ", field_name);
+                    self.print_token_value(field_val)?;
+                    if i < fields.len() - 1 { print!(", "); }
+                }
+                print!("}}");
+            }
             _ => return Err(ParseError::UnexpectedToken {
                 expected: Token::String("a printable value".to_string()),
                 found: Some(token.clone()),
@@ -679,10 +760,13 @@ impl Interpreter {
             (Token::Boolean(_), Token::Boolean(_)) => true,
             (Token::List(_), Token::List(_)) => true,
 
+            (Token::Identifier(type_name), Token::StructInstance { type_name: instance_type, .. }) => {
+                type_name == instance_type
+            }
+
             _ => false
         }        
     }
-
 }
 
 fn to_float(token: &Token) -> Option<f64> {
@@ -690,5 +774,45 @@ fn to_float(token: &Token) -> Option<f64> {
         Token::Integer(n) => Some(*n as f64),
         Token::Float(f) => Some(*f),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::WolfEngine;
+
+    #[test]
+    fn test_struct() {
+        let mut engine = WolfEngine::new();
+        engine.run(r#"
+            struct Point
+                x: int
+                y: int
+            end
+
+            let p: Point = Point(10, 20)
+            print p
+        "#).unwrap();
+    }
+
+    #[test]
+    fn test_impl() {
+        let mut engine = WolfEngine::new();
+        engine.run(r#"
+            struct Point
+                x: int
+                y: int
+            end
+
+            impl Point
+                fn get_x()
+                    return self.x
+                end
+            end
+
+            let p: Point = Point(10, 20)
+            let result: int = p.get_x()
+            print result
+        "#).unwrap();
     }
 }
