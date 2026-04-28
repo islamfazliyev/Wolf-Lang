@@ -16,7 +16,7 @@ let px: int = 1
 
 let is_player_alive: bool = true
 
-fn draw_map(pyd, pxd)
+fn draw_map(pyd: int, pxd: int)
     for int y = 0 range 10
         let row_str: string = ""
         for int x = 0 range 10
