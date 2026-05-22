@@ -1,3 +1,7 @@
-if 15 < 10 or 10 < 5
-    print "a"
-end
+import "examples/player.wolf" as player
+
+player.get_pos()
+player.move_right()
+player.move_right()
+player.move_down()
+player.get_pos()

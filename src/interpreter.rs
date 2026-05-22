@@ -21,6 +21,7 @@ pub struct Interpreter {
     pub struct_defs: HashMap<String, Vec<(String, Token)>>,
     pub impl_defs: HashMap<String, HashMap<String, Function>>,
     pub loaded_modules: HashMap<String, String>,
+    pub module_globals: HashMap<String, HashMap<String, Token>>,
     pub namespaces: HashMap<String, HashMap<String, Function>>,
 }
 
@@ -50,6 +51,7 @@ impl Interpreter {
             struct_defs: HashMap::new(),
             impl_defs: HashMap::new(),
             loaded_modules: HashMap::new(),
+            module_globals: HashMap::new(),
             namespaces: HashMap::new(),
         }
     }
@@ -319,6 +321,8 @@ impl Interpreter {
 
                 let mut sub = Interpreter::new();
                 sub.interpret(ast_tree)?;
+                let module_scope = sub.scopes.into_iter().next().unwrap_or_default();
+                self.module_globals.insert(identifier.clone(), module_scope);
 
                 let module_fns = sub.functions.borrow().clone();
                 self.namespaces.insert(identifier.clone(), module_fns);
@@ -548,7 +552,23 @@ impl Interpreter {
                         }
                     }
                 }
+                let fn_scope = self.scopes.last().cloned().unwrap_or_default();
+
                 self.scopes.pop();
+
+                for (param_name, _) in func.params.iter() {
+                if let Some(updated) = fn_scope.get(param_name) {
+                    if matches!(updated, Token::StructInstance { .. }) {
+                        for scope in self.scopes.iter_mut().rev() {
+                            if scope.contains_key(param_name) {
+                                scope.insert(param_name.clone(), updated.clone());
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+                
                 return_value
             }
 
@@ -576,7 +596,15 @@ impl Interpreter {
                         );
                     }
 
+
+                    // Inject module globals so the function can see x, y, etc.
+                    
                     let mut call_scope = HashMap::new();
+                    if let Some(globals) = self.module_globals.get(&obj_name).cloned() {
+                        for (k, v) in globals {
+                            call_scope.insert(k, v);
+                        }
+                    }
                     for ((param_name, _param_type), arg_val) in func.params.iter().zip(evaluated_args) {
                         call_scope.insert(param_name.clone(), arg_val);
                     }
@@ -596,7 +624,30 @@ impl Interpreter {
                             }
                         }
                     }
+                    let fn_scope = self.scopes.last().cloned().unwrap_or_default();
                     self.scopes.pop();
+
+                    // Write back to parent scopes (existing fix)
+                    for (key, val) in &fn_scope {
+                        for scope in self.scopes.iter_mut().rev() {
+                            if scope.contains_key(key) {
+                                scope.insert(key.clone(), val.clone());
+                                break;
+                            }
+                        }
+                    }
+
+                    // Also persist changes back to module globals
+                    if let Some(globals) = self.module_globals.get_mut(&obj_name) {
+                        for (key, val) in fn_scope {
+                            if globals.contains_key(&key) {
+                                globals.insert(key, val);
+                            }
+                        }
+                    }
+
+                    
+
                     return return_value;
                 }
 
@@ -657,6 +708,7 @@ impl Interpreter {
                             }
                         }
                     }
+                    
                     self.scopes.pop();
                     return return_value;
                 }

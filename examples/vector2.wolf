@@ -25,6 +25,7 @@ end
 
 let vec: Vector2 = Vector2(2, 2)
 
+let vList : list<Vector2> = []
 
 vec.move_x(10)
 vec.move_y(20)

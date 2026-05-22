@@ -1,0 +1,15 @@
+let x: int = 0
+let y: int = 0
+
+fn move_right()
+    x = x + 10
+end
+
+fn move_down()
+    y = y + 10
+end
+
+fn get_pos()
+    print x
+    print y
+end
