@@ -7,7 +7,7 @@
 - Line based error logs
 
 ### Changed
-- language seperate
+- language seperated from parser to interpreter and ast
 
 ## [0.1.1] - 2025-12-02
 ### Added
