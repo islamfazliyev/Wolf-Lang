@@ -14,3 +14,7 @@ print type[2], type[1]
 type2[1][1] = 5
 
 print type2[1][1], type2[0]
+
+if type2[1][1] == 5
+    print "text"
+end

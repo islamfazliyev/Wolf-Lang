@@ -121,9 +121,9 @@ print item                  # Potion
 Multidimensional lists and index assignment are also supported:
 
 ```wolf
-let grid: list<int> = [1, 2, 3]
-grid[0] = 99
-print grid[0]               # 99
+let grid: list<list<int>> = [[10, 20],[90, 99]]
+grid[0][0] = 99
+print grid[0][0]               # 99
 ```
 
 ### Control Flow

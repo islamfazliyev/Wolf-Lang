@@ -13,7 +13,7 @@ use lexer::lexer;
 use tokens::Token;
 
 
-use crate::{ast::Stmt, interpreter::{Function, Interpreter}};
+use crate::{ast::{Stmt, StmtNode}, interpreter::{Function, Interpreter}};
 
 pub type NativeFn = Rc<dyn Fn(Vec<Token>) -> Token>;
 
@@ -117,7 +117,8 @@ impl WolfEngine {
 
         // 2. Initialize Parser
         let mut parser = Parser::new(tokens);
-        let mut ast_tree: Vec<Stmt> = Vec::new();
+
+        let mut ast_tree: Vec<StmtNode> = Vec::new();
 
         // 3. Loop and build the AST
         // We keep calling parse_statement() until we hit EOF

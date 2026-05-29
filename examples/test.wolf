@@ -1,7 +1,2 @@
-import "examples/player.wolf" as player
-
-player.get_pos()
-player.move_right()
-player.move_right()
-player.move_down()
-player.get_pos()
+let name: string = "aaa"
+let int: string "aaa"

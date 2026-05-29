@@ -1,12 +1,19 @@
 use crate::tokens::{ Token};
 
-pub fn lexer(content: &str) -> Result<Vec<Token>, String> {
-    let mut token: Vec<Token> = Vec::new();
+pub fn lexer(content: &str) -> Result<Vec<(Token, usize)>, String> {
+    let mut token: Vec<(Token, usize)> = Vec::new();
     let chars: Vec<char> = content.chars().collect();
     let mut i = 0;
+    let mut line = 1;
     
     while i < chars.len() {
         let c = chars[i];
+
+        if c == '\n' {
+            line += 1;
+            i += 1;
+            continue;
+        }
 
         // Skip spaces
         if c.is_whitespace() {
@@ -25,31 +32,31 @@ pub fn lexer(content: &str) -> Result<Vec<Token>, String> {
             let slice: String = chars[start..i].iter().collect();
 
             match slice.as_str() {
-                "let" => token.push(Token::Let),
-                "int" => token.push(Token::TypeInt),
-                "float" => token.push(Token::TypeFloat),
-                "bool" => token.push(Token::TypeBool),
-                "string" => token.push(Token::TypeString),
-                "list" => token.push(Token::TypeList(Box::new(Token::Unknown))),
-                "print" => token.push(Token::Print),
-                "true" => token.push(Token::Boolean(true)),
-                "false" => token.push(Token::Boolean(false)),
-                "if" => token.push(Token::If),
-                "else" => token.push(Token::Else),
-                "while" => token.push(Token::While),
-                "for" => token.push(Token::For),
-                "and" => token.push(Token::And),
-                "or" => token.push(Token::Or),
-                "fn" => token.push(Token::Func),
-                "struct" => token.push(Token::Struct),
-                "impl" => token.push(Token::Impl),
-                "range" => token.push(Token::Range),
-                "return" => token.push(Token::Return),
-                "import" => token.push(Token::Import),
-                "as" => token.push(Token::As),
+                "let" => token.push((Token::Let, line)),
+                "int" => token.push((Token::TypeInt, line)),
+                "float" => token.push((Token::TypeFloat, line)),
+                "bool" => token.push((Token::TypeBool, line)),
+                "string" => token.push((Token::TypeString, line)),
+                "list" => token.push((Token::TypeList(Box::new(Token::Unknown)), line)),
+                "print" => token.push((Token::Print, line)),
+                "true" => token.push((Token::Boolean(true), line)),
+                "false" => token.push((Token::Boolean(false), line)),
+                "if" => token.push((Token::If, line)),
+                "else" => token.push((Token::Else, line)),
+                "while" => token.push((Token::While, line)),
+                "for" => token.push((Token::For, line)),
+                "and" => token.push((Token::And, line)),
+                "or" => token.push((Token::Or, line)),
+                "fn" => token.push((Token::Func, line)),
+                "struct" => token.push((Token::Struct, line)),
+                "impl" => token.push((Token::Impl, line)),
+                "range" => token.push((Token::Range, line)),
+                "return" => token.push((Token::Return, line)),
+                "import" => token.push((Token::Import, line)),
+                "as" => token.push((Token::As, line)),
                 //other
-                "end" => token.push(Token::EndOfCondition),
-                _ => token.push(Token::Identifier(slice)),
+                "end" => token.push((Token::EndOfCondition, line)),
+                _ => token.push((Token::Identifier(slice), line)),
             }
 
             continue;
@@ -67,10 +74,10 @@ pub fn lexer(content: &str) -> Result<Vec<Token>, String> {
 
             if slice.contains('.') {
                 let value: f64 = slice.parse().map_err(|_| format!("Invalid float number: {}", slice))?;
-                token.push(Token::Float(value));
+                token.push((Token::Float(value), line));
             } else {
                 let value: i64 = slice.parse().map_err(|_| format!("Invalid integer: {}", slice))?;
-                token.push(Token::Integer(value));
+                token.push((Token::Integer(value), line));
             }
 
             continue;
@@ -88,7 +95,7 @@ pub fn lexer(content: &str) -> Result<Vec<Token>, String> {
                 return Err("Unterminated string literal".to_string());
             }
             let slice: String = chars[start..i].iter().collect();
-            token.push(Token::String(slice));
+            token.push((Token::String(slice), line));
             i += 1; // skip closing
             continue;
         }
@@ -98,10 +105,10 @@ pub fn lexer(content: &str) -> Result<Vec<Token>, String> {
             
             '=' => { 
                 if i + 1 < chars.len() && chars[i + 1] == '=' {
-                    token.push(Token::Equals);
+                    token.push((Token::Equals, line));
                     i += 2;
                 } else {
-                    token.push(Token::Assign);
+                    token.push((Token::Assign, line));
                     i += 1;
                 }
                 continue;
@@ -109,11 +116,11 @@ pub fn lexer(content: &str) -> Result<Vec<Token>, String> {
 
             '!' => {
                 if i + 1 < chars.len() && chars[i + 1] == '=' {
-                    token.push(Token::NotEquals);
+                    token.push((Token::NotEquals, line));
                     i += 2;
                     
                 } else {
-                    token.push(Token::Bang); 
+                    token.push((Token::Bang, line)); 
                     i += 1;
                 }
                 continue;
@@ -121,10 +128,10 @@ pub fn lexer(content: &str) -> Result<Vec<Token>, String> {
 
             '<' => { 
                 if i + 1 < chars.len() && chars[i + 1] == '=' {
-                    token.push(Token::LesserEquals);
+                    token.push((Token::LesserEquals, line));
                     i += 2;
                 } else {
-                    token.push(Token::Lesser);
+                    token.push((Token::Lesser, line));
                     i += 1;
                 }
                 continue;
@@ -132,10 +139,10 @@ pub fn lexer(content: &str) -> Result<Vec<Token>, String> {
 
             '>' => { 
                 if i + 1 < chars.len() && chars[i + 1] == '=' {
-                    token.push(Token::GreaterEquals);
+                    token.push((Token::GreaterEquals, line));
                     i += 2;
                 } else {
-                    token.push(Token::Greater);
+                    token.push((Token::Greater, line));
                     i += 1;
                 }
                 continue;
@@ -149,30 +156,30 @@ pub fn lexer(content: &str) -> Result<Vec<Token>, String> {
                 continue;
             }
 
-            '+' => { token.push(Token::Plus); i += 1; continue; }
-            '-' => { token.push(Token::Minus); i += 1; continue; }
-            '*' => { token.push(Token::Multiply); i += 1; continue; }
-            '/' => { token.push(Token::Divide); i += 1; continue; }
-            '(' => { token.push(Token::LParen); i += 1; continue; }
-            ')' => { token.push(Token::RParen); i += 1; continue; }
-            '[' => { token.push(Token::LBracket); i += 1; continue; }
-            ']' => { token.push(Token::RBracket); i += 1; continue; }
-            ',' => { token.push(Token::Comma); i += 1; continue; }
+            '+' => { token.push((Token::Plus, line)); i += 1; continue; }
+            '-' => { token.push((Token::Minus, line)); i += 1; continue; }
+            '*' => { token.push((Token::Multiply, line)); i += 1; continue; }
+            '/' => { token.push((Token::Divide, line)); i += 1; continue; }
+            '(' => { token.push((Token::LParen, line)); i += 1; continue; }
+            ')' => { token.push((Token::RParen, line)); i += 1; continue; }
+            '[' => { token.push((Token::LBracket, line)); i += 1; continue; }
+            ']' => { token.push((Token::RBracket, line)); i += 1; continue; }
+            ',' => { token.push((Token::Comma, line)); i += 1; continue; }
             ':' => {
                 if i + 1 < chars.len() && chars[i + 1] == ':' {
-                    token.push(Token::DoubleColon);
+                    token.push((Token::DoubleColon, line));
                     i += 2;
                 } else {
-                    token.push(Token::Colon);
+                    token.push((Token::Colon, line));
                     i += 1;
                 }
                 continue;
             }
-            '.' => { token.push(Token::Dot); i += 1; continue; }
+            '.' => { token.push((Token::Dot, line)); i += 1; continue; }
             _ => {}
         }
 
-        token.push(Token::EOF);
+        token.push((Token::EOF, line));
 
         return Err(format!("Unexpected token starting at index {}", i));
     }

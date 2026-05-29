@@ -1,10 +1,11 @@
 use std::{collections::HashMap, convert::identity, ptr::null, thread::Scope, vec};
 
 use crate::{ast::Stmt, ast::LiteralValue, ast::Expr, error_handler::ParseError, tokens::{self, Token}};
+use crate::ast::StmtNode;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Parser {
-    tokens: Vec<Token>,
+    tokens: Vec<(Token, usize)>,
     pos: usize,
     output: Vec<String>,
     // A stack of HashMaps to manage variable scopes.
@@ -13,14 +14,8 @@ pub struct Parser {
 }
 
 impl Parser {
-    pub fn new(tokens: Vec<Token>) -> Self {
-        Parser {
-            tokens,
-            pos: 0,
-            output: Vec::new(),
-            // Initialize with one, global scope.
-            
-        }
+    pub fn new(tokens: Vec<(Token, usize)>) -> Self {
+        Parser { tokens, pos: 0, output: Vec::new() }
     }
 
     fn token_to_literal(&self, token: Token) -> LiteralValue {
@@ -36,18 +31,23 @@ impl Parser {
     /// Returns a reference to the current token without consuming it.
     pub fn current_token(&self) -> Option<&Token> {
         // get token of current position
-        self.tokens.get(self.pos)
+        self.tokens.get(self.pos).map(|(token, _)| token)
+    }
+
+    pub fn current_line(&self) -> usize {
+        self.tokens.get(self.pos).map(|(_, line)| *line).unwrap_or(0)
     }
 
     /// Returns a reference to the next token without consuming it.
     pub fn peek(&self) -> Option<&Token> {
         // get token of next position
-        self.tokens.get(self.pos + 1)
+        self.tokens.get(self.pos + 1).map(|(token, _)| token)
     }
 
     /// Checks if the current token matches the expected `token_type`.
     /// If it matches, consumes the token and advances the parser. If not, it returns an `Err`.
     fn eat(&mut self, token_type: Token) -> Result<(), ParseError> {
+        let line = self.current_line();
         // gets token type from current token
         if let Some(tok) = self.current_token() {
             // Looks if tok equals to token type
@@ -61,6 +61,7 @@ impl Parser {
                 Err(ParseError::UnexpectedToken {
                     expected: token_type,
                     found: Some(tok.clone()),
+                    line
                 })
             }
         }
@@ -69,18 +70,21 @@ impl Parser {
             Err(ParseError::UnexpectedToken {
                 expected: token_type,
                 found: None,
+                line
             })
         }
     }
     
 
     pub fn parse_import(&mut self) -> Result<Stmt, ParseError> {
+
         self.eat(Token::Import)?;
         let dir = if let Some(Token::String(name)) = self.current_token().cloned() {
             self.pos += 1;
             name
         } else {
-            return  Err(ParseError::UnexpectedToken { expected: Token::TypeString, found: self.current_token().cloned() });
+            let line = self.current_line();
+            return  Err(ParseError::UnexpectedToken { expected: Token::TypeString, found: self.current_token().cloned(), line });
         };
 
         self.eat(Token::As)?;
@@ -89,9 +93,11 @@ impl Parser {
             self.pos += 1;
             name
         } else {
+            let line = self.current_line();
             return Err(ParseError::UnexpectedToken {
                 expected: Token::Identifier("module alias".to_string()),
                 found: self.current_token().cloned(),
+                line
             });
         };
         Ok(Stmt::Import { directory: dir, identifier: iden})
@@ -107,9 +113,11 @@ impl Parser {
             self.pos += 1;
             name
         } else {
+            let line = self.current_line();
             return Err(ParseError::UnexpectedToken {
                 expected: Token::Identifier("name".to_string()),
                 found: self.current_token().cloned(),
+                line
             });
         };
 
@@ -162,17 +170,21 @@ impl Parser {
                 }
 
                 _ => {
+                    let line = self.current_line();
                     // throw error
                     Err(ParseError::UnexpectedToken {
                         expected: Token::TypeInt, // Placeholder
                         found: Some(next),
+                        line
                     })
                 }
             }
         } else {
+            let line = self.current_line();
             return Err(ParseError::UnexpectedToken {
                 expected: Token::TypeInt,
                 found: None,
+                line
             });
         }
         
@@ -185,9 +197,11 @@ impl Parser {
             self.pos += 1;
             name
         } else {
+            let line = self.current_line();
             return Err(ParseError::UnexpectedToken {
                 expected: Token::Identifier("variable name".to_string()),
                 found: self.current_token().cloned(),
+                line
             });
         };
 
@@ -274,7 +288,7 @@ impl Parser {
         self.parse_logic_or()
     }
 
-    fn parse_block(&mut self) -> Result<Vec<Stmt>, ParseError> {
+    fn parse_block(&mut self) -> Result<Vec<StmtNode>, ParseError> {
         let mut statements = Vec::new();
         
         while let Some(tok) = self.current_token() {
@@ -287,16 +301,19 @@ impl Parser {
             self.eat(Token::EndOfCondition)?; // 'end'i yok et
             Ok(statements)
         } else {
+            let line = self.current_line();
             
             return Err(ParseError::UnexpectedToken {
                 expected: Token::EndOfCondition,
                 found: self.current_token().cloned(),
+                line
             })
         }
     }
 
     /// Parses an 'if' statement and its block.
     fn parse_if(&mut self) -> Result<Stmt, ParseError> {
+        let current_line = self.current_line();
         self.eat(Token::If)?;
 
         // 1. Parse Condition (returns Expr, doesn't evaluate it)
@@ -305,14 +322,19 @@ impl Parser {
         // 2. Parse the "Then" block
         // We keep parsing statements until we hit 'else' or 'end'
         let then_stmts = self.parse_block()?;
-        let then_branch = Stmt::Block(then_stmts);
+        let then_branch = StmtNode {
+            stmt: Stmt::Block(then_stmts),
+            line: current_line,
+        };
 
         // 3. Parse the Optional "Else" block
         let else_branch = if let Some(Token::Else) = self.current_token() {
             self.eat(Token::Else)?;
-            
             let else_stmts = self.parse_block()?;
-            Some(Box::new(Stmt::Block(else_stmts)))
+            Some(Box::new(StmtNode {
+                stmt: Stmt::Block(else_stmts),
+                line: current_line,
+            }))
         } else {
             None
         };
@@ -326,6 +348,7 @@ impl Parser {
 
     /// Parses a 'while' loop.
     fn parse_while(&mut self) -> Result<Stmt, ParseError> {
+        let current_line = self.current_line();
         self.eat(Token::While)?;
 
         // 1. Parse Condition
@@ -333,7 +356,7 @@ impl Parser {
 
         // 2. Parse Body (Collects statements until 'end')
         let body_stmts = self.parse_block()?;
-        let body = Stmt::Block(body_stmts);
+        let body = StmtNode { stmt: Stmt::Block(body_stmts), line: current_line };
 
         
 
@@ -344,6 +367,7 @@ impl Parser {
     }
 
     fn parse_for(&mut self) -> Result<Stmt, ParseError> {
+        let current_line = self.current_line();
         // 1. Consume 'for'
         self.eat(Token::For)?;
         
@@ -351,9 +375,11 @@ impl Parser {
         if let Some(Token::TypeInt) = self.current_token() {
             self.eat(Token::TypeInt)?; 
         } else {
+            let line = self.current_line();
             return Err(ParseError::UnexpectedToken { 
                 expected: Token::TypeInt, 
-                found: self.current_token().cloned() 
+                found: self.current_token().cloned(),
+                line
             });
         }
 
@@ -362,9 +388,11 @@ impl Parser {
             self.pos += 1;
             name
         } else {
+            let line = self.current_line();
             return Err(ParseError::UnexpectedToken { 
                 expected: Token::Identifier("variable".to_string()), 
-                found: self.current_token().cloned() 
+                found: self.current_token().cloned(),
+                line
             });
         };
 
@@ -384,7 +412,7 @@ impl Parser {
             var_name,
             start_value,
             end_value,
-            body: Box::new(Stmt::Block(body_stmts)),
+            body: Box::new(StmtNode { stmt: Stmt::Block(body_stmts), line: current_line }),
         })
 
     }
@@ -398,9 +426,11 @@ impl Parser {
             self.pos += 1;
             n
         } else {
+            let line = self.current_line();
             return Err(ParseError::UnexpectedToken {
                 expected: Token::Identifier("function name".to_string()),
                 found: self.current_token().cloned(),
+                line
             });
         };
 
@@ -416,9 +446,11 @@ impl Parser {
                     self.pos += 1;
                     n
                 } else {
+                    let line = self.current_line();
                     return Err(ParseError::UnexpectedToken {
                         expected: Token::Identifier("param name".to_string()),
                         found: self.current_token().cloned(),
+                        line
                     });
                 };
 
@@ -450,33 +482,47 @@ impl Parser {
     }
 
     fn parse_struct(&mut self) -> Result<Stmt, ParseError> {
+        let current_line = self.current_line();
+        
         self.eat(Token::Struct)?;
 
         let name = if let Some(Token::Identifier(n)) = self.current_token().cloned() {
             self.pos += 1;
             n
         } else {
+            let line = self.current_line();
             return Err(ParseError::UnexpectedToken {
                 expected: Token::Identifier("struct name".to_string()),
                 found: self.current_token().cloned(),
+                line
             });
         };
 
         let mut fields = Vec::new();
         while !self.check(Token::EndOfCondition) {
+            let field_line = self.current_line();
             let field_name = if let Some(Token::Identifier(n)) = self.current_token().cloned() {
                 self.pos += 1;
                 n
             } else {
+                let line = self.current_line();
                 return Err(ParseError::UnexpectedToken {
                     expected: Token::Identifier("struct name".to_string()),
                     found: self.current_token().cloned(),
+                    line
                 });
             };
 
             self.eat(Token::Colon)?;
             let field_type = self.parse_type()?;
-            fields.push(Stmt::Let { name: field_name, data_type: field_type, value: Expr::Literal(LiteralValue::Nil) });
+            fields.push(StmtNode {
+                stmt: Stmt::Let { 
+                    name: field_name, 
+                    data_type: field_type, 
+                    value: Expr::Literal(LiteralValue::Nil) 
+                },
+                line: field_line
+            });
         }
 
         self.eat(Token::EndOfCondition)?;
@@ -490,20 +536,30 @@ impl Parser {
             self.pos += 1;
             n
         } else {
+            let line = self.current_line();
             return Err(ParseError::UnexpectedToken {
                 expected: Token::Identifier("impl name".to_string()),
                 found: self.current_token().cloned(),
+                line
             });
         };
 
         let mut methods = Vec::new();
         while !self.check(Token::EndOfCondition) {
             if self.check(Token::Func) {
-                methods.push(self.parse_fn()?);
+                let func_line = self.current_line();
+                let func_stmt = self.parse_fn()?;
+
+                methods.push(StmtNode {
+                    stmt: func_stmt,
+                    line: func_line
+                });
             } else {
+                let line = self.current_line();
                 return Err(ParseError::UnexpectedToken {
                     expected: Token::Func,
                     found: self.current_token().cloned(),
+                    line
                 });
             }
         }
@@ -586,8 +642,9 @@ impl Parser {
 
     /// Parses a factor (the highest precedence: literals, variables, unary ops, parentheses).
     fn parse_factor(&mut self) -> Result<Expr, ParseError> {
+        let line = self.current_line();
         let tok = self.current_token().cloned().ok_or(ParseError::UnexpectedToken {
-            expected: Token::Integer(0), found: None,
+            expected: Token::Integer(0), found: None, line
         })?;
 
         match tok {
@@ -702,7 +759,9 @@ impl Parser {
                 })
             },
             
-            _ => Err(ParseError::UnexpectedToken { expected: Token::Unknown, found: Some(tok) })
+            _ => {
+                let line = self.current_line();
+                Err(ParseError::UnexpectedToken { expected: Token::Unknown, found: Some(tok), line })}
         }
     }
 
@@ -808,9 +867,11 @@ impl Parser {
             self.pos += 1;
             name
         } else {
+            let line = self.current_line();
             return Err(ParseError::UnexpectedToken { 
                 expected: Token::Identifier("method name".to_string()), 
-                found: self.current_token().cloned() 
+                found: self.current_token().cloned(),
+                line
             });
         };
 
@@ -865,16 +926,18 @@ impl Parser {
 
     /// The main dispatch function. It "senses" what the current token is
     /// and dispatches to the correct parsing function for that statement.
-    pub fn parse_statement(&mut self) -> Result<Stmt, ParseError> {
+    pub fn parse_statement(&mut self) -> Result<StmtNode, ParseError> {
+        let current_line = self.current_line();
         if self.current_token().is_none() {
+            
             return Err(ParseError::UnexpectedToken { 
-                expected: Token::Unknown, found: None 
+                expected: Token::Unknown, found: None, line: current_line
             });
         }
 
         let token = self.current_token().unwrap().clone();
 
-        match token {
+        let stmt = match token{
             Token::Import => self.parse_import(),
             Token::Let => self.parse_let(),
             Token::Print => self.parse_print(),
@@ -947,11 +1010,19 @@ impl Parser {
                 }
             },
             
-            _ => Err(ParseError::UnexpectedToken {
+            _ => {
+                let line = self.current_line();
+                Err(ParseError::UnexpectedToken {
                 expected: Token::Unknown,
                 found: Some(token),
-            }),
-        }
+                line
+            })},
+        }?;
+
+        Ok(StmtNode {
+            stmt,
+            line: current_line,
+        })
     }
         
 }

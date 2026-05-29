@@ -1,0 +1,17 @@
+# 1. Struct tanımı
+struct Point
+    x: int
+    y: int
+end
+
+# 2. İçi boş bir struct listesi oluşturma
+let my_points: list<Point> = []
+
+# 3. Listeye sonradan eleman ekleme (interpreter.rs'deki push metodu sayesinde)
+my_points.push(Point(10, 20))
+my_points.push(Point(30, 40))
+
+# Veya anında elemanlarla dolu bir struct listesi oluşturma
+let active_points: list<Point> = [Point(1, 2), Point(3, 4)]
+
+print my_points[0]

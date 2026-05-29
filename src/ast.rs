@@ -9,6 +9,11 @@ pub enum LiteralValue {
     Nil,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct StmtNode {
+    pub stmt: Stmt,
+    pub line: usize,
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
@@ -79,36 +84,36 @@ pub enum Stmt {
         value: Expr
     },
     Print(Vec<Expr>),
-    Block(Vec<Stmt>),
+    Block(Vec<StmtNode>),
     If {
         condition: Expr,
-        then_branch: Box<Stmt>,
-        else_branch: Option<Box<Stmt>>,
+        then_branch: Box<StmtNode>,
+        else_branch: Option<Box<StmtNode>>,
     },
     While {
         condition: Expr,
-        body: Box<Stmt>,
+        body: Box<StmtNode>,
     },
     For {
         var_name: String,
         start_value: Expr,
         end_value: Expr,
-        body: Box<Stmt>,
+        body: Box<StmtNode>,
     },
     Func {
         name: String,
         params: Vec<(String, Token)>,
-        body: Vec<Stmt>,
+        body: Vec<StmtNode>,
     },
 
     Struct {
         name: String,
-        body: Vec<Stmt>
+        body: Vec<StmtNode>
     },
 
     Impl {
         name: String,
-        body: Vec<Stmt>
+        body: Vec<StmtNode>
     },
 
     Return {
