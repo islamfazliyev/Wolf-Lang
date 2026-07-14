@@ -370,37 +370,93 @@ impl Interpreter {
             }
 
             Expr::Binary { left, op, right } => {
-                let left = self.evaluate(*left, line)?;
-                let right = self.evaluate(*right, line)?;
+                let left_val = self.evaluate(*left, line)?;
+                let right_val = self.evaluate(*right, line)?;
 
+                // 1. Eşitlik Kontrolleri
                 if op == Token::Equals {
-                    return Ok(Token::Boolean(left == right));
+                    return Ok(Token::Boolean(left_val == right_val));
                 }
                 if op == Token::NotEquals {
-                    return Ok(Token::Boolean(left != right));
+                    return Ok(Token::Boolean(left_val != right_val));
                 }
 
-                if let (Some(l_num), Some(r_num)) = (to_float(&left), to_float(&right)) {
-                    match op {
-                        Token::Greater => return Ok(Token::Boolean(l_num > r_num)),
-                        Token::Lesser => return Ok(Token::Boolean(l_num < r_num)),
-                        Token::GreaterEquals => return Ok(Token::Boolean(l_num >= r_num)),
-                        Token::LesserEquals => return Ok(Token::Boolean(l_num <= r_num)),
-                        _ => {} 
-                    }
-                }
-
-                match (left, op, right) {
+                // 2. Tüm Matematiksel, Karşılaştırma ve String İşlemleri tek bir match altında
+                match (left_val, op, right_val) {
+                    // Katı Tam Sayı İşlemleri
                     (Token::Integer(l), Token::Plus, Token::Integer(r)) => Ok(Token::Integer(l + r)),
-                    (Token::Float(l), Token::Plus, Token::Float(r)) => Ok(Token::Float(l + r)),
                     (Token::Integer(l), Token::Minus, Token::Integer(r)) => Ok(Token::Integer(l - r)),
-                    (Token::Float(l), Token::Minus, Token::Float(r)) => Ok(Token::Float(l - r)),
                     (Token::Integer(l), Token::Multiply, Token::Integer(r)) => Ok(Token::Integer(l * r)),
+                    (Token::Integer(l), Token::Divide, Token::Integer(r)) => {
+                        if r == 0 {
+                            return Err(ParseError::RuntimeError { message: "Runtime Error: Division by zero!".to_string(), line });
+                        }
+                        Ok(Token::Integer(l / r))
+                    }
+
+                    // Katı Ondalıklı Sayı İşlemleri
+                    (Token::Float(l), Token::Plus, Token::Float(r)) => Ok(Token::Float(l + r)),
+                    (Token::Float(l), Token::Minus, Token::Float(r)) => Ok(Token::Float(l - r)),
                     (Token::Float(l), Token::Multiply, Token::Float(r)) => Ok(Token::Float(l * r)),
-                    (Token::Integer(l), Token::Divide, Token::Integer(r)) => Ok(Token::Integer(l / r)),
-                    (Token::Float(l), Token::Divide, Token::Float(r)) => Ok(Token::Float(l / r)),
-                    (Token::String(l), Token::Plus, Token::String(r)) => Ok(Token::String(format!("{}{}", l, r))),
-                    _ => Err(ParseError::RuntimeError { message: "Type mismatch in binary expression".to_string(), line }),
+                    (Token::Float(l), Token::Divide, Token::Float(r)) => {
+                        if r == 0.0 {
+                            return Err(ParseError::RuntimeError { message: "Runtime Error: Division by zero!".to_string(), line });
+                        }
+                        Ok(Token::Float(l / r))
+                    }
+
+                    // String Birleştirme (Sol taraf String ise)
+                    (Token::String(l), Token::Plus, other) => {
+                        let r_str = match other {
+                            Token::Integer(n) => n.to_string(),
+                            Token::Float(f) => f.to_string(),
+                            Token::Boolean(b) => b.to_string(),
+                            Token::String(s) => s,
+                            _ => format!("{:?}", other),
+                        };
+                        Ok(Token::String(format!("{}{}", l, r_str)))
+                    }
+                    
+                    // String Birleştirme (Sağ taraf String ise)
+                    (other, Token::Plus, Token::String(r)) => {
+                        let l_str = match other {
+                            Token::Integer(n) => n.to_string(),
+                            Token::Float(f) => f.to_string(),
+                            Token::Boolean(b) => b.to_string(),
+                            _ => format!("{:?}", other),
+                        };
+                        Ok(Token::String(format!("{}{}", l_str, r)))
+                    }
+
+                    // Genel Sayısal Fallback (Karşılaştırmalar ve Karışık tipler buraya düşer)
+                    (l_val, op_tok, r_val) => {
+                        if let (Some(l), Some(r)) = (to_float(&l_val), to_float(&r_val)) {
+                            match op_tok {
+                                Token::Greater => Ok(Token::Boolean(l > r)),
+                                Token::Lesser => Ok(Token::Boolean(l < r)),
+                                Token::GreaterEquals => Ok(Token::Boolean(l >= r)),
+                                Token::LesserEquals => Ok(Token::Boolean(l <= r)),
+                                Token::Plus => Ok(Token::Float(l + r)),
+                                Token::Minus => Ok(Token::Float(l - r)),
+                                Token::Multiply => Ok(Token::Float(l * r)),
+                                Token::Divide => {
+                                    if r == 0.0 { 
+                                        return Err(ParseError::RuntimeError { message: "Runtime Error: Division by zero!".to_string(), line }); 
+                                    }
+                                    Ok(Token::Float(l / r))
+                                }
+                                _ => Err(ParseError::RuntimeError { 
+                                    message: format!("Type mismatch in binary expression! Left: {:?}, Op: {:?}, Right: {:?}", l_val, op_tok, r_val), 
+                                    line 
+                                }),
+                            }
+                        } else {
+                            Err(ParseError::RuntimeError { 
+                                message: format!("Type mismatch in binary expression! Left: {:?}, Op: {:?}, Right: {:?}", l_val, op_tok, r_val), 
+                                line 
+                            })
+                        }
+                    }
                 }
             }
 
@@ -540,27 +596,28 @@ impl Interpreter {
                 self.scopes.push(call_scope);
 
                 let mut return_value = Token::Unknown;
+                let mut encountered_error = None;
+
                 for node in func.body {
                     match self.execute(node) {
                         Ok(_) => {}
-                        Err(ParseError::Return { value }) => { return_value = value; break; }
-                        Err(e) => { self.scopes.pop(); return Err(e); }
+                        Err(ParseError::Return { value }) => { 
+                            return_value = value; 
+                            break; 
+                        }
+                        Err(e) => { 
+                            encountered_error = Some(e); 
+                            break; 
+                        }
                     }
                 }
+
+                // Fonksiyon biter bitmez kendi scope'unu kesinlikle temizle
                 let fn_scope = self.scopes.last().cloned().unwrap_or_default();
                 self.scopes.pop();
 
-                for (param_name, _) in func.params.iter() {
-                    if let Some(updated) = fn_scope.get(param_name) {
-                        if matches!(updated, Token::StructInstance { .. }) {
-                            for scope in self.scopes.iter_mut().rev() {
-                                if scope.contains_key(param_name) {
-                                    scope.insert(param_name.clone(), updated.clone());
-                                    break;
-                                }
-                            }
-                        }
-                    }
+                if let Some(err) = encountered_error {
+                    return Err(err);
                 }
                 
                 Ok(return_value)
@@ -726,6 +783,10 @@ impl Interpreter {
                 } else {
                     Err(ParseError::RuntimeError { message: "Field access on non-struct value".to_string(), line })
                 }
+            }
+
+            Expr::Grouping(inner) => {
+                self.evaluate(*inner, line)
             }
 
             _ => Ok(Token::Unknown),

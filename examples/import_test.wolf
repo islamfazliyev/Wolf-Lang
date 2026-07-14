@@ -1,9 +1,5 @@
-import "examples/test.wolf"
+import "examples/test.wolf" as math
 
-fn add(a: int, b: int)
-    return a + b
-end
+let ad : int = math.add(5, 2)
 
-let close : int = close(5, 2)
-
-print close
+print ad

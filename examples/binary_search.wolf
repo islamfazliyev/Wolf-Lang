@@ -30,6 +30,7 @@ let result: int = binary_search(target, 0, 9)
 
 if result == -1 
     print "Target not found!"
+end
 else
     print "Target found at index: " + result
 end

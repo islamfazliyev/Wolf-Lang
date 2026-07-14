@@ -1,3 +1,5 @@
+import "examples/vector2.wolf" as vec2
+
 let x: int = 10
 let y: list<list<int>> = [[1,1,1,1], [2,2,2,2]]
 let z: list<int> = [1,1,1,1]
@@ -41,3 +43,10 @@ end
 
 let name: string = input("Enter your name: ")
 print name
+
+let v: vec2::Vector2 = vec2::Vector2(2, 2)
+
+while v.x < 10
+    v.x = v.x + 1
+    print v.x
+end
