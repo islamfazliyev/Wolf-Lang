@@ -50,3 +50,9 @@ while v.x < 10
     v.x = v.x + 1
     print v.x
 end
+
+let ri : int = randInt(0, 10)
+let rf : float = randFloat(0, 10)
+
+print ri
+print rf

@@ -14,13 +14,13 @@ pub struct Function {
 
 #[derive(Clone)]
 pub struct Interpreter {
-    pub scopes: Vec<HashMap<String, Token>>,
+    pub scopes: Vec<HashMap<String, Rc<RefCell<Token>>>>,
     pub functions: Rc<RefCell<HashMap<String, Function>>>,
     pub native_fns: Rc<RefCell<HashMap<String, NativeFn>>>,
     pub struct_defs: HashMap<String, Vec<(String, Token)>>,
     pub impl_defs: HashMap<String, HashMap<String, Function>>,
     pub loaded_modules: HashMap<String, String>,
-    pub module_globals: HashMap<String, HashMap<String, Token>>,
+    pub module_globals: HashMap<String, HashMap<String, Rc<RefCell<Token>>>>,
     pub namespaces: HashMap<String, HashMap<String, Function>>,
 }
 
@@ -101,7 +101,7 @@ impl Interpreter {
                 let declared_value = self.evaluate(value, line)?;
                 if Self::check_type_compatibility(&data_type, &declared_value) {
                     if let Some(scope) = self.scopes.last_mut() {
-                        scope.insert(name, declared_value);
+                        scope.insert(name, Rc::new(RefCell::new(declared_value)));
                     }
                     Ok(())
                 } else {
@@ -115,64 +115,38 @@ impl Interpreter {
 
             Stmt::ListAssign { list_name, indices, value } => {
                 let new_val = self.evaluate(value, line)?;
-
                 let mut evaluated_indices = Vec::new();
-
                 for expr in indices {
                     match self.evaluate(expr, line)? {
                         Token::Integer(n) => {
-                            if n < 0 { return Err(ParseError::RuntimeError { message: "Runtime Error: Index cannot be negative!".to_string(), line })}
+                            if n < 0 { return Err(ParseError::RuntimeError { message: "Index cannot be negative!".into(), line }); }
                             evaluated_indices.push(n as usize);
                         }
-
-                        _ => return Err(ParseError::RuntimeError { message: "Runtime Error: Index must be an Integer!".to_string(), line }),
+                        _ => return Err(ParseError::RuntimeError { message: "Index must be an Integer!".into(), line }),
                     }
                 }
-
                 if evaluated_indices.is_empty() {
-                    return Err(ParseError::RuntimeError { message: "Runtime Error: No indices provided!".to_string(), line });
+                    return Err(ParseError::RuntimeError { message: "No indices provided!".into(), line });
                 }
 
-                let mut is_assigned = false;
+                let cell = self.get_variable(&list_name)
+                    .ok_or_else(|| ParseError::RuntimeError { message: format!("Undeclared list '{}'", list_name), line })?;
 
-                for scope in self.scopes.iter_mut().rev() {
-                    if let Some(mut token) = scope.get_mut(&list_name) {
-                        is_assigned = true;
-                        let last_idx = evaluated_indices.pop().unwrap();
-                        for &idx in &evaluated_indices {
-                            match token {
-                                Token::List(elements) => {
-                                    if idx < elements.len() {
-                                        
-                                        token = &mut elements[idx];
-                                    } else {
-                                        return Err(ParseError::RuntimeError { message: "Runtime Error: Index out of bounds!".to_string(), line })
-                                    }
-                                }
-                                _ => return Err(ParseError::RuntimeError { message: format!("Runtime Error: Variable '{}' is not a multi-dimensional list!", list_name), line })
-                            }
-                        }
-
-                        match token {
-                            Token::List(elements) => {
-                                if last_idx < elements.len() {
-                                    
-                                    elements[last_idx] = new_val.clone();
-                                    break;
-                                } else {
-                                    return Err(ParseError::RuntimeError { message: "Runtime Error: Index out of bounds!".to_string(), line })
-                                }
-                            }
-                            _ => return Err(ParseError::RuntimeError { message: "Runtime Error: Target is not a list!".to_string(), line })
-                        }
-                    }
+                let mut token = cell.borrow_mut();
+                let last_idx = evaluated_indices.pop().unwrap();
+                let mut current = &mut *token;
+                for &idx in &evaluated_indices {
+                    current = match current {
+                        Token::List(elements) if idx < elements.len() => &mut elements[idx],
+                        Token::List(_) => return Err(ParseError::RuntimeError { message: "Index out of bounds!".into(), line }),
+                        _ => return Err(ParseError::RuntimeError { message: format!("'{}' is not multi-dimensional!", list_name), line }),
+                    };
                 }
-
-                if !is_assigned {
-                    return Err(ParseError::RuntimeError { message: format!("Runtime Error: Undeclared list '{}'", list_name), line });
+                match current {
+                    Token::List(elements) if last_idx < elements.len() => { elements[last_idx] = new_val; Ok(()) }
+                    Token::List(_) => Err(ParseError::RuntimeError { message: "Index out of bounds!".into(), line }),
+                    _ => Err(ParseError::RuntimeError { message: "Target is not a list!".into(), line }),
                 }
-
-                Ok(())
             }
 
             Stmt::Block(statements) => {
@@ -244,7 +218,7 @@ impl Interpreter {
 
                 while current < limit {
                     if let Some(scope) = self.scopes.last_mut() {
-                        scope.insert(var_name.clone(), Token::Integer(current));
+                        scope.insert(var_name.clone(), Rc::new(RefCell::new(Token::Integer(current))));
                     }
 
                     self.execute(*body.clone())?;
@@ -366,7 +340,7 @@ impl Interpreter {
             }),
 
             Expr::Variable(name) => {
-                Ok(self.get_variable(&name).cloned().unwrap_or(Token::Unknown))
+                Ok(self.get_variable(&name).map(|c| c.borrow().clone()).unwrap_or(Token::Unknown))
             }
 
             Expr::Binary { left, op, right } => {
@@ -497,18 +471,18 @@ impl Interpreter {
 
             Expr::Assign { name, value } => {
                 let new_value = self.evaluate(*value, line)?;
-
-                for scope in self.scopes.iter_mut().rev() {
-                    if let Some(old_value) = scope.get_mut(&name) {
-                        if Self::check_type_compatibility(old_value, &new_value) {
-                            *old_value = new_value.clone();
-                            return Ok(new_value);
+                match self.get_variable(&name) {
+                    Some(cell) => {
+                        let compatible = Self::check_type_compatibility(&cell.borrow(), &new_value);
+                        if compatible {
+                            *cell.borrow_mut() = new_value.clone();
+                            Ok(new_value)
                         } else {
-                            return Err(ParseError::RuntimeError { message: format!("Type mismatch! Variable '{}' is {:?} but you tried to assign {:?}", name, old_value, new_value), line });
+                            Err(ParseError::TypeMismatch { expected: cell.borrow().clone(), found: new_value, line })
                         }
                     }
+                    None => Err(ParseError::UndeclaredVariable { name, line }),
                 }
-                Err(ParseError::RuntimeError { message: format!("Variable '{}' not declared.", name), line })
             }
 
             Expr::Index { list, index } => {
@@ -591,7 +565,7 @@ impl Interpreter {
 
                 let mut call_scope = HashMap::new();
                 for ((param_name, _param_type), arg_val) in func.params.iter().zip(evaluated_args) {
-                    call_scope.insert(param_name.clone(), arg_val);
+                    call_scope.insert(param_name.clone(), Rc::new(RefCell::new(arg_val)));
                 }
                 self.scopes.push(call_scope);
 
@@ -645,10 +619,10 @@ impl Interpreter {
 
                     let mut call_scope = HashMap::new();
                     if let Some(globals) = self.module_globals.get(&obj_name).cloned() {
-                        for (k, v) in globals { call_scope.insert(k, v); }
+                        for (k, cell) in globals { call_scope.insert(k, cell); }
                     }
                     for ((param_name, _param_type), arg_val) in func.params.iter().zip(evaluated_args) {
-                        call_scope.insert(param_name.clone(), arg_val);
+                        call_scope.insert(param_name.clone(), Rc::new(RefCell::new(arg_val)));
                     }
                     self.scopes.push(call_scope);
 
@@ -662,40 +636,29 @@ impl Interpreter {
                     }
                     let fn_scope = self.scopes.last().cloned().unwrap_or_default();
                     self.scopes.pop();
-
-                    for (key, val) in &fn_scope {
-                        for scope in self.scopes.iter_mut().rev() {
-                            if scope.contains_key(key) {
-                                scope.insert(key.clone(), val.clone());
-                                break;
-                            }
-                        }
-                    }
-
-                    if let Some(globals) = self.module_globals.get_mut(&obj_name) {
-                        for (key, val) in fn_scope {
-                            if globals.contains_key(&key) { globals.insert(key, val); }
-                        }
-                    }
                     return Ok(return_value);
                 }
 
-                let instance = self.scopes.iter().rev().find_map(|scope| scope.get(&obj_name).cloned());
-
-                if let Some(Token::StructInstance { ref type_name, .. }) = instance {
-                    let func = match self.impl_defs.get(type_name).and_then(|methods| methods.get(&method)).cloned() {
+                let instance = self.get_variable(&obj_name);
+                let type_name = instance.as_ref().and_then(|cell| {
+                    if let Token::StructInstance { type_name, .. } = &*cell.borrow() {
+                        Some(type_name.clone())
+                    } else { None }
+                });
+                if let Some(type_name) = type_name {
+                    let cell = instance.unwrap();
+                    let func = match self.impl_defs.get(&type_name).and_then(|m| m.get(&method)).cloned() {
                         Some(f) => f,
                         None => return Err(ParseError::RuntimeError { message: format!("Struct '{}' has no method '{}'", type_name, method), line }),
                     };
-
                     if func.params.len() != evaluated_args.len() {
                         return Err(ParseError::RuntimeError { message: format!("'{}' expects {} args but got {}", method, func.params.len(), evaluated_args.len()), line });
                     }
 
                     let mut call_scope = HashMap::new();
-                    call_scope.insert("self".to_string(), instance.unwrap());
+                    call_scope.insert("self".to_string(), cell.clone());
                     for ((param_name, _), arg_val) in func.params.iter().zip(evaluated_args) {
-                        call_scope.insert(param_name.clone(), arg_val);
+                        call_scope.insert(param_name.clone(), Rc::new(RefCell::new(arg_val)));
                     }
                     self.scopes.push(call_scope);
 
@@ -707,47 +670,26 @@ impl Interpreter {
                             Err(e) => { self.scopes.pop(); return Err(e); }
                         }
                     }
-
-                    if let Some(updated_self) = self.scopes.last().and_then(|s| s.get("self")).cloned() {
-                        for scope in self.scopes.iter_mut().rev() {
-                            if scope.contains_key(&obj_name) {
-                                scope.insert(obj_name.clone(), updated_self);
-                                break;
-                            }
-                        }
-                    }
                     self.scopes.pop();
                     return Ok(return_value);
                 }
 
-                let list = self.scopes.iter().rev().find_map(|scope| scope.get(&obj_name).cloned());
+                let list_cell = self.get_variable(&obj_name);
 
-                match list {
-                    Some(Token::List(mut elements)) => {
-                        match method.as_str() {
-                            "push" => {
-                                let val = evaluated_args.into_iter().next().unwrap_or(Token::Unknown);
-                                elements.push(val);
-                                for scope in self.scopes.iter_mut().rev() {
-                                    if scope.contains_key(&obj_name) {
-                                        scope.insert(obj_name, Token::List(elements));
-                                        break;
-                                    }
+                match list_cell {
+                    Some(cell) => {
+                        let mut token = cell.borrow_mut();
+                        match &mut *token {
+                            Token::List(elements) => match method.as_str() {
+                                "push" => {
+                                    elements.push(evaluated_args.into_iter().next().unwrap_or(Token::Unknown));
+                                    Ok(Token::Unknown)
                                 }
-                                Ok(Token::Unknown)
-                            }
-                            "pop" => {
-                                let popped = elements.pop().unwrap_or(Token::Unknown);
-                                for scope in self.scopes.iter_mut().rev() {
-                                    if scope.contains_key(&obj_name) {
-                                        scope.insert(obj_name, Token::List(elements));
-                                        break;
-                                    }
-                                }
-                                Ok(popped)
-                            }
-                            "len" => Ok(Token::Integer(elements.len() as i64)),
-                            _ => Err(ParseError::RuntimeError { message: format!("Unknown list method '{}'", method), line }),
+                                "pop" => Ok(elements.pop().unwrap_or(Token::Unknown)),
+                                "len" => Ok(Token::Integer(elements.len() as i64)),
+                                _ => Err(ParseError::RuntimeError { message: format!("Unknown list method '{}'", method), line }),
+                            },
+                            _ => Err(ParseError::RuntimeError { message: format!("'{}' is not a list", obj_name), line }),
                         }
                     }
                     Some(_) => Err(ParseError::RuntimeError { message: format!("'{}' is not a list, cannot call method '{}'", obj_name, method), line }),
@@ -761,13 +703,13 @@ impl Interpreter {
                     Expr::Variable(ref name) => name.clone(),
                     _ => return Err(ParseError::RuntimeError { message: "Field set on non-variable".to_string(), line }),
                 };
-
-                for scope in self.scopes.iter_mut().rev() {
-                    if let Some(Token::StructInstance { fields, .. }) = scope.get_mut(&obj_name) {
-                        if let Some(f) = fields.iter_mut().find(|(name, _)| name == &field) {
-                            f.1 = new_val.clone();
-                            return Ok(new_val);
-                        }
+                let cell = self.get_variable(&obj_name)
+                    .ok_or_else(|| ParseError::RuntimeError { message: format!("Undefined '{}'", obj_name), line })?;
+                let mut token = cell.borrow_mut();
+                if let Token::StructInstance { fields, .. } = &mut *token {
+                    if let Some(f) = fields.iter_mut().find(|(n, _)| n == &field) {
+                        f.1 = new_val.clone();
+                        return Ok(new_val);
                     }
                 }
                 Err(ParseError::RuntimeError { message: format!("Field '{}' not found on '{}'", field, obj_name), line })
@@ -793,10 +735,10 @@ impl Interpreter {
         }
     }
 
-    fn get_variable(&self, name: &str) -> Option<&Token> {
+    fn get_variable(&self, name: &str) -> Option<Rc<RefCell<Token>>> {
         for scope in self.scopes.iter().rev() {
-            if let Some(val) = scope.get(name) {
-                return Some(val);
+            if let Some(cell) = scope.get(name) {
+                return Some(cell.clone());
             }
         }
         None
@@ -817,10 +759,10 @@ impl Interpreter {
                 }
             },
             Token::Identifier(name) => {
-                if let Some(value_token) = self.get_variable(name) {
-                    self.print_token_value(value_token, line)?;
+                if let Some(cell) = self.get_variable(name) {
+                    self.print_token_value(&cell.borrow(), line)?;
                 } else {
-                    return Err(ParseError::UndeclaredVariable { name: name.clone(), line});
+                    return Err(ParseError::UndeclaredVariable { name: name.clone(), line });
                 }
             }
             Token::StructInstance { type_name, fields } => {
@@ -910,4 +852,51 @@ mod tests {
             print result
         "#).unwrap();
     }
+
+    #[test]
+    fn test_no_caller_scope_leak() {
+        let mut engine = WolfEngine::new();
+        engine.run(r#"
+            struct Counter
+                value: int
+            end
+
+            impl Counter
+                fn tick(value: int)
+                    self.value = self.value + value
+                    return value
+                end
+            end
+
+            let value: int = 999
+            let c: Counter = Counter(0)
+            let result: int = c.tick(5)
+
+            print value
+            print result
+        "#).unwrap();
+    }
+
+    #[test]
+    fn test_self_mutation_persists() {
+        let mut engine = WolfEngine::new();
+        engine.run(r#"
+            struct Counter
+                value: int
+            end
+
+            impl Counter
+                fn increment()
+                    self.value = self.value + 1
+                end
+            end
+
+            let c: Counter = Counter(0)
+            c.increment()
+            c.increment()
+            c.increment()
+            print c
+        "#).unwrap();
+    }
+
 }

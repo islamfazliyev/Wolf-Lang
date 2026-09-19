@@ -40,31 +40,31 @@ impl WolfEngine {
     
     pub fn push_int(&mut self, name: &str, value: i64) {
         if let Some(scope) = self.interpreter.scopes.first_mut() {
-            scope.insert(name.to_string(), Token::Integer(value));
+            scope.insert(name.to_string(), Rc::new(RefCell::new(Token::Integer(value))));
         }
     }
 
     pub fn push_float(&mut self, name: &str, value: f64) {
         if let Some(scope) = self.interpreter.scopes.first_mut() {
-            scope.insert(name.to_string(), Token::Float(value));
+            scope.insert(name.to_string(), Rc::new(RefCell::new(Token::Float(value))));
         }
     }
 
     pub fn push_str(&mut self, name: &str, value: &str) {
         if let Some(scope) = self.interpreter.scopes.first_mut() {
-            scope.insert(name.to_string(), Token::String(value.to_string()));
+            scope.insert(name.to_string(), Rc::new(RefCell::new(Token::String(value.to_string()))));
         }
     }
 
     pub fn push_bool(&mut self, name: &str, value: bool) {
         if let Some(scope) = self.interpreter.scopes.first_mut() {
-            scope.insert(name.to_string(), Token::Boolean(value));
+            scope.insert(name.to_string(), Rc::new(RefCell::new(Token::Boolean(value))));
         }
     }
 
     pub fn push_list(&mut self, name: &str, value: Vec<Token>) {
         if let Some(scope) = self.interpreter.scopes.first_mut() {
-            scope.insert(name.to_string(), Token::List(value));
+            scope.insert(name.to_string(), Rc::new(RefCell::new(Token::List(value))));
         }
     }
 
@@ -75,38 +75,6 @@ impl WolfEngine {
         let wrapped = Rc::new(func);
         self.interpreter.native_fns.borrow_mut().insert(name.to_string(), wrapped);
     }
-
-    
-
-    // pub fn run(&mut self, content: &str) -> Result<(), String> {
-    //     let tokens = match lexer(content) {
-    //         Ok(t) => t,
-    //         Err(e) => return Err(format!("Lexer Error: {}", e)),
-    //     };
-
-    //     let mut parser = Parser::new(tokens);
-
-    //     if let Some(scope) = parser.scopes.first_mut() {
-    //         for (k, v) in &self.globals {
-    //             scope.insert(k.clone(), v.clone());
-    //         }
-    //     }
-
-    //     // Parser çalıştırılır
-    //     while parser.current_token().is_some() {
-    //         if let Err(e) = parser.parse_statement() {
-    //             return Err(format!("Parser Error: {:?}", e));
-    //         }
-    //     }
-
-    //     if let Some(final_scope) = parser.scopes.first() {
-    //         self.globals = final_scope.clone();
-    //     }
-
-        
-        
-    //     Ok(())
-    // }
 
     pub fn run(&mut self, content: &str) -> Result<(), String> {
         // 1. Run Lexer
@@ -136,10 +104,11 @@ impl WolfEngine {
     }
 
     pub fn get_int(&self, name: &str) -> Option<i64> {
-        // Look in the first scope
         if let Some(scope) = self.interpreter.scopes.first() {
-            if let Some(Token::Integer(n)) = scope.get(name) {
-                return Some(*n);
+            if let Some(cell) = scope.get(name) {
+                if let Token::Integer(n) = &*cell.borrow() {
+                    return Some(*n);
+                }
             }
         }
         None
@@ -147,8 +116,10 @@ impl WolfEngine {
 
     pub fn get_float(&self, name: &str) -> Option<f64> {
         if let Some(scope) = self.interpreter.scopes.first() {
-            if let Some(Token::Float(n)) = scope.get(name) {
-                return Some(*n);
+            if let Some(cell) = scope.get(name) {
+                if let Token::Float(n) = &*cell.borrow() {
+                    return Some(*n);
+                }
             }
         }
         None
@@ -156,16 +127,21 @@ impl WolfEngine {
 
     pub fn get_str(&self, name: &str) -> Option<String> {
         if let Some(scope) = self.interpreter.scopes.first() {
-            if let Some(Token::String(n)) = scope.get(name) {
-                return Some(n.to_string());
+            if let Some(cell) = scope.get(name) {
+                if let Token::String(n) = &*cell.borrow() {
+                    return Some(n.clone());
+                }
             }
         }
         None
     }
+
     pub fn get_bool(&self, name: &str) -> Option<bool> {
         if let Some(scope) = self.interpreter.scopes.first() {
-            if let Some(Token::Boolean(n)) = scope.get(name) {
-                return Some(*n);
+            if let Some(cell) = scope.get(name) {
+                if let Token::Boolean(n) = &*cell.borrow() {
+                    return Some(*n);
+                }
             }
         }
         None
@@ -173,8 +149,10 @@ impl WolfEngine {
 
     pub fn get_list(&self, name: &str) -> Option<Vec<Token>> {
         if let Some(scope) = self.interpreter.scopes.first() {
-            if let Some(Token::List(n)) = scope.get(name) {
-                return Some(n.clone());
+            if let Some(cell) = scope.get(name) {
+                if let Token::List(n) = &*cell.borrow() {
+                    return Some(n.clone());
+                }
             }
         }
         None
@@ -192,7 +170,7 @@ impl WolfEngine {
 
         let mut call_scope = std::collections::HashMap::new();
         for ((param_name, _param_type), arg_val) in func.params.iter().zip(args) {
-            call_scope.insert(param_name.clone(), arg_val);
+            call_scope.insert(param_name.clone(), Rc::new(RefCell::new(arg_val)));
         }
         self.interpreter.scopes.push(call_scope);
 

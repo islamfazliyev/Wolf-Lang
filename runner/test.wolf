@@ -1,3 +1,0 @@
-let string message = "test"
-
-print message
